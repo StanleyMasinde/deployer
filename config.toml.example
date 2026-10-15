@@ -15,6 +15,7 @@ url = "mysql://deployer:PASSWORD@127.0.0.1:3306/deployer"
 current = "github"
 
 [providers.github]
+# Client ID from the GitHub App settings page, for example Iv1.…
 app_id = "APP_ID"
 installation_id = 0
 private_key = "/etc/deployer/github-app.pem"

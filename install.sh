@@ -80,14 +80,16 @@ if [ ! -f /etc/deployer/config.toml ]; then
     public_url=$answer
     prompt 'MySQL connection URL (mysql://USER:PASSWORD@HOST/DATABASE)'
     database_url=$answer
-    prompt 'GitHub App ID'
+    prompt 'GitHub App client ID'
     app_id=$answer
     prompt 'GitHub installation ID'
     installation_id=$answer
     prompt 'Path to your GitHub App private key PEM'
     private_key=$answer
 
-    case "$installation_id" in ''|*[!0-9]*) fail 'Installation ID must be numeric.' ;; esac
+    # JWT iss is the client ID. The id in
+    # /app/installations/{installation_id}/access_tokens is still an integer.
+    case "$installation_id" in ''|*[!0-9]*) fail 'Installation ID must be the integer from the installation URL (/installations/123). The client ID belongs in the previous prompt.' ;; esac
     [ -s "$private_key" ] || fail 'Private key file is missing.'
 
     session_secret=$(openssl rand -hex 32)

@@ -25,10 +25,11 @@ Create the App in the GitHub account or organization that owns your repositories
      create the build workflow and open its pull request.
 5. Subscribe to **Workflow run** events and create the App for **Only on this
    account**.
-6. Record the **App ID**, generate a private key, and copy the downloaded PEM file
-   to your VPS. The installer asks for its path.
+6. Record the **Client ID**. That is the JWT issuer. Generate a private key and
+   copy the downloaded PEM file to your VPS. The installer asks for its path.
 7. Select **Install App**, install it on the repositories you want to deploy, and
-   record the numeric installation ID after `/installations/` in its settings URL.
+   record the installation ID after `/installations/` in its settings URL. That
+   ID is still an integer. It is separate from the client ID.
 
 For GitHub's registration details, see [Registering a GitHub App](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/registering-a-github-app).
 
