@@ -53,13 +53,14 @@ fn only_successful_trusted_workflows_enter_the_queue() {
 }
 
 #[test]
-fn generated_workflow_runs_builds_on_github_only() {
+fn vite_workflow_builds_and_uploads_static_output_on_github() {
     let app = App {
         id: 1,
         provider: "github".into(),
         repository: "owner/repo".into(),
         branch: "main".into(),
         domain: "app.example.com".into(),
+        build_config: Default::default(),
         install_command: "npm ci\necho ready".into(),
         build_command: "npm run build".into(),
         output_directory: "dist".into(),
@@ -71,6 +72,79 @@ fn generated_workflow_runs_builds_on_github_only() {
     assert!(yaml.contains("branches: [\"main\"]"));
     assert!(yaml.contains("          npm ci\n          echo ready\n"));
     assert!(yaml.contains("name: deployer-app"));
+    assert!(yaml.contains("uses: actions/setup-node@v6"));
+    assert!(yaml.contains("node-version: '24'"));
+    assert!(yaml.contains("name: Build Vite app"));
+    assert!(yaml.contains("          npm run build\n"));
+    assert!(yaml.contains("DEPLOYER_OUTPUT: \"dist\""));
+    assert!(yaml.contains("test -f \"$DEPLOYER_OUTPUT/index.html\""));
+    assert!(yaml.contains("path: \"dist/\""));
+    assert!(yaml.contains("if-no-files-found: error"));
+    assert!(yaml.contains("group: deployer-${{ github.ref }}"));
+    assert!(yaml.contains("workflow_dispatch:"));
     assert!(!yaml.contains("pull_request:"));
     assert!(!yaml.contains("curl"));
+}
+
+fn workflow_app() -> App {
+    App {
+        id: 1,
+        provider: "github".into(),
+        repository: "owner/repo".into(),
+        branch: "release/site".into(),
+        domain: "app.example.com".into(),
+        build_config: Default::default(),
+        install_command: "install-dependencies".into(),
+        build_command: "build-site".into(),
+        output_directory: "public/site".into(),
+        spa: false,
+        workflow_pr: None,
+    }
+}
+
+#[test]
+fn vite_workflows_install_the_explicit_package_manager() {
+    use deployer::domain::PackageManager;
+    for (manager, setup) in [
+        (PackageManager::Npm, "actions/setup-node@v6"),
+        (PackageManager::Pnpm, "pnpm/setup@v3"),
+        (PackageManager::Yarn, "corepack prepare yarn@4 --activate"),
+        (PackageManager::Bun, "oven-sh/setup-bun@v2"),
+    ] {
+        let mut app = workflow_app();
+        app.build_config.package_manager = Some(manager);
+        let yaml = workflow::render(&app);
+        assert!(yaml.contains(setup));
+        assert!(yaml.contains("          install-dependencies\n"));
+        assert!(yaml.contains("          build-site\n"));
+        assert!(yaml.contains("path: \"public/site/\""));
+        assert!(yaml.contains("branches: [\"release/site\"]"));
+        assert!(yaml.contains("name: deployer-app"));
+        assert!(!yaml.contains("run: npm ci"));
+    }
+}
+
+#[test]
+fn plain_static_workflow_stages_root_files_without_a_runtime_or_build() {
+    use deployer::domain::{BuildConfig, DeploymentType, Ecosystem, Framework};
+    let mut app = workflow_app();
+    app.build_config = BuildConfig {
+        deployment_type: DeploymentType::Static,
+        ecosystem: Ecosystem::None,
+        package_manager: None,
+        framework: Framework::PlainHtml,
+    };
+    app.install_command.clear();
+    app.build_command.clear();
+    app.output_directory = ".".into();
+    let yaml = workflow::render(&app);
+    assert!(yaml.contains("DEPLOYER_OUTPUT: \".\""));
+    assert!(yaml.contains("test -f \"$DEPLOYER_OUTPUT/index.html\""));
+    assert!(yaml.contains("path: ${{ runner.temp }}/deployer-site/"));
+    assert!(yaml.contains("include-hidden-files: false"));
+    assert!(yaml.contains("name: deployer-app"));
+    assert!(!yaml.contains("setup-node"));
+    assert!(!yaml.contains("npm"));
+    assert!(!yaml.contains("name: Install dependencies"));
+    assert!(!yaml.contains("name: Build Vite app"));
 }

@@ -1,0 +1,33 @@
+# Vite template managed by Deployer. Review and merge this PR to enable deployments.
+name: Deployer
+on:
+  push:
+    branches: [{branch}]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deployer-${{{{ github.ref }}}}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+{setup}      - name: Install dependencies
+        run: |
+{install}      - name: Build Vite app
+        run: |
+{build}      - name: Verify Vite output
+        env:
+          DEPLOYER_OUTPUT: {output_directory}
+        run: test -f "$DEPLOYER_OUTPUT/index.html"
+      - name: Upload Vite build
+        uses: actions/upload-artifact@v7
+        with:
+          name: {artifact}
+          path: {output_path}
+          include-hidden-files: false
+          if-no-files-found: error
+          retention-days: 3

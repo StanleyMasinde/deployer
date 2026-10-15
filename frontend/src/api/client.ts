@@ -1,3 +1,5 @@
+import type { BuildConfig } from "../build";
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -52,6 +54,7 @@ export function body(type: string, attributes: object): string {
 }
 
 export type App = {
+  buildConfig: BuildConfig;
   id: number;
   repository: string;
   branch: string;

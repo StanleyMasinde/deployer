@@ -1,20 +1,29 @@
 use super::models;
 use crate::domain;
 
-impl From<models::App> for domain::App {
-    fn from(app: models::App) -> Self {
-        Self {
+impl TryFrom<models::App> for domain::App {
+    type Error = anyhow::Error;
+    fn try_from(app: models::App) -> anyhow::Result<Self> {
+        let build_config: domain::BuildConfig = app
+            .build_config
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()?
+            .unwrap_or_default();
+        build_config.validate()?;
+        Ok(Self {
             id: app.id,
             provider: app.provider,
             repository: app.repository,
             branch: app.branch,
             domain: app.domain,
+            build_config,
             install_command: app.install_command,
             build_command: app.build_command,
             output_directory: app.output_directory,
             spa: app.spa,
             workflow_pr: app.workflow_pr,
-        }
+        })
     }
 }
 

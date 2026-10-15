@@ -25,6 +25,8 @@ pub struct App {
     #[column(type = text)]
     pub install_command: String,
     #[column(type = text)]
+    pub build_config: Option<String>,
+    #[column(type = text)]
     pub build_command: String,
     pub output_directory: String,
     pub spa: bool,

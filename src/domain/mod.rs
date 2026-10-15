@@ -1,3 +1,6 @@
+mod build;
+pub use build::{BuildConfig, DeploymentType, Ecosystem, Framework, PackageManager};
+
 use anyhow::{bail, ensure};
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +12,7 @@ pub struct App {
     pub repository: String,
     pub branch: String,
     pub domain: String,
+    pub build_config: BuildConfig,
     pub install_command: String,
     pub build_command: String,
     pub output_directory: String,
@@ -22,7 +26,11 @@ pub struct NewApp {
     pub repository: String,
     pub branch: String,
     pub domain: String,
+    #[serde(default)]
+    pub build_config: BuildConfig,
+    #[serde(default)]
     pub install_command: String,
+    #[serde(default)]
     pub build_command: String,
     pub output_directory: String,
     #[serde(default)]
@@ -43,9 +51,18 @@ impl NewApp {
                 && !self.branch.contains(".."),
             "invalid branch"
         );
+        self.build_config.validate()?;
+        if self.build_config.ecosystem == Ecosystem::None {
+            ensure!(
+                self.install_command.is_empty() && self.build_command.is_empty(),
+                "plain static sites must not have install or build commands"
+            );
+        }
         for command in [&self.install_command, &self.build_command] {
             ensure!(
-                !command.trim().is_empty() && command.len() <= 2000 && !command.contains('\0'),
+                (self.build_config.ecosystem == Ecosystem::None || !command.trim().is_empty())
+                    && command.len() <= 2000
+                    && !command.contains('\0'),
                 "build commands must contain 1–2000 characters"
             );
         }
@@ -54,11 +71,12 @@ impl NewApp {
             !self.output_directory.is_empty()
                 && self.output_directory.len() <= 191
                 && !self.output_directory.starts_with('/')
-                && self.output_directory.split('/').all(|p| !p.is_empty()
-                    && p != ".."
-                    && p != "."
-                    && p.bytes()
-                        .all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))),
+                && (self.output_directory == "."
+                    || self.output_directory.split('/').all(|p| !p.is_empty()
+                        && p != ".."
+                        && p != "."
+                        && p.bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c)))),
             "output directory must be a relative path without traversal"
         );
         Ok(())

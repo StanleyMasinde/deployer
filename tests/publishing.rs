@@ -22,6 +22,7 @@ fn app() -> App {
         repository: "owner/repo".into(),
         branch: "main".into(),
         domain: "app.example.com".into(),
+        build_config: Default::default(),
         install_command: "npm ci".into(),
         build_command: "npm run build".into(),
         output_directory: "dist".into(),

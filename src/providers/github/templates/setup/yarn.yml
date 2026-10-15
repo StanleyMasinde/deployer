@@ -1,0 +1,8 @@
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Set up Yarn
+        run: |
+          npm install --global corepack
+          corepack enable
+          corepack prepare yarn@4 --activate

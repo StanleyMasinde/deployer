@@ -34,6 +34,7 @@ async fn mysql_migrations_deduplication_recovery_and_stale_runs() {
                 repository: format!("test/repo-{nonce}"),
                 branch: "main".into(),
                 domain: format!("{nonce}.example.com"),
+                build_config: Default::default(),
                 install_command: "npm ci".into(),
                 build_command: "npm run build".into(),
                 output_directory: "dist".into(),
@@ -42,6 +43,64 @@ async fn mysql_migrations_deduplication_recovery_and_stale_runs() {
         )
         .await
         .unwrap();
+    assert_eq!(
+        store.app(app.id).await.unwrap().build_config,
+        app.build_config
+    );
+    // Existing rows have no configuration and must retain the original Node/npm behavior.
+    toasty::sql::statement("UPDATE apps SET build_config = NULL WHERE id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    assert_eq!(
+        store.app(app.id).await.unwrap().build_config,
+        Default::default()
+    );
+
+    for manager in [
+        deployer::domain::PackageManager::Pnpm,
+        deployer::domain::PackageManager::Yarn,
+        deployer::domain::PackageManager::Bun,
+    ] {
+        let mut input = NewApp {
+            repository: format!("test/config-{nonce}-{manager:?}"),
+            branch: "main".into(),
+            domain: format!("config-{nonce}-{manager:?}.example.com").to_lowercase(),
+            build_config: Default::default(),
+            install_command: "install".into(),
+            build_command: "build".into(),
+            output_directory: "dist".into(),
+            spa: false,
+        };
+        input.build_config.package_manager = Some(manager);
+        input.validate().unwrap();
+        let saved = store.create_app("github", &input).await.unwrap();
+        assert_eq!(
+            store.app(saved.id).await.unwrap().build_config,
+            input.build_config
+        );
+    }
+    let plain_input = NewApp {
+        repository: format!("test/plain-{nonce}"),
+        branch: "main".into(),
+        domain: format!("plain-{nonce}.example.com"),
+        build_config: deployer::domain::BuildConfig {
+            deployment_type: deployer::domain::DeploymentType::Static,
+            ecosystem: deployer::domain::Ecosystem::None,
+            package_manager: None,
+            framework: deployer::domain::Framework::PlainHtml,
+        },
+        install_command: String::new(),
+        build_command: String::new(),
+        output_directory: ".".into(),
+        spa: false,
+    };
+    plain_input.validate().unwrap();
+    let plain = store.create_app("github", &plain_input).await.unwrap();
+    let saved_plain = store.app(plain.id).await.unwrap();
+    assert_eq!(saved_plain.build_config, plain_input.build_config);
+    assert!(!deployer::providers::github::workflow::render(&saved_plain).contains("setup-node"));
     let build = BuildCompleted {
         repository: app.repository.clone(),
         branch: app.branch.clone(),
