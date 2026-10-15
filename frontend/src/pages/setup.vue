@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
+import { Label } from "reka-ui";
+import UiInput from "../components/ui/UiInput.vue";
+import UiButton from "../components/ui/UiButton.vue";
 import { useRouter } from "vue-router";
 import { body, request } from "../api/client";
 
@@ -66,10 +69,10 @@ async function createRoot() {
       <p>Read the one-time setup code on your VPS:</p>
       <pre class="setup-command"><code>sudo cat /var/lib/deployer/state/setup-code</code></pre>
       <p v-if="error" class="message error" role="alert">{{ error }}</p>
-      <label for="code">Setup code</label>
-      <input id="code" v-model="form.code" required autocomplete="off" :disabled="busy" />
-      <label for="name">Name</label>
-      <input
+      <Label for="code">Setup code</Label>
+      <UiInput id="code" v-model="form.code" required autocomplete="off" :disabled="busy" />
+      <Label for="name">Name</Label>
+      <UiInput
         id="name"
         v-model="form.name"
         required
@@ -77,8 +80,8 @@ async function createRoot() {
         autocomplete="name"
         :disabled="busy"
       />
-      <label for="email">Email address</label>
-      <input
+      <Label for="email">Email address</Label>
+      <UiInput
         id="email"
         v-model="form.email"
         type="email"
@@ -87,8 +90,8 @@ async function createRoot() {
         autocomplete="email"
         :disabled="busy"
       />
-      <label for="password">Password</label>
-      <input
+      <Label for="password">Password</Label>
+      <UiInput
         id="password"
         v-model="form.password"
         required
@@ -97,8 +100,8 @@ async function createRoot() {
         autocomplete="new-password"
         :disabled="busy"
       />
-      <label for="confirmation">Confirm password</label>
-      <input
+      <Label for="confirmation">Confirm password</Label>
+      <UiInput
         id="confirmation"
         v-model="form.confirmation"
         required
@@ -107,9 +110,9 @@ async function createRoot() {
         autocomplete="new-password"
         :disabled="busy"
       />
-      <button class="primary" :disabled="busy">
+      <UiButton type="submit" class="primary" :disabled="busy">
         {{ busy ? "Creating account…" : "Create root account" }}
-      </button>
+      </UiButton>
     </form>
   </main>
 </template>

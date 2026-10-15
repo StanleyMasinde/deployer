@@ -9,3 +9,6 @@
 /.hallmark
 /dist
 /.pnpm-store
+githubapp.pem
+
+/.local
