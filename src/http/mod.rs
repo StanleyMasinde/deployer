@@ -50,6 +50,13 @@ pub fn router(state: State) -> Router {
             get(handlers::session).delete(handlers::logout),
         )
         .route("/api/apps", get(handlers::apps).post(handlers::add_app))
+        .route(
+            "/api/apps/{id}",
+            get(handlers::app)
+                .put(handlers::update_app)
+                .delete(handlers::delete_app),
+        )
+        .route("/api/apps/{id}/deployments", get(handlers::app_deployments))
         .route("/api/apps/{id}/workflow", post(handlers::workflow))
         .route("/api/deployments", get(handlers::deployments))
         .route("/api/repositories", get(handlers::repositories))

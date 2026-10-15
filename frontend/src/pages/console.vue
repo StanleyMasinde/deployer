@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from "vue";
 import { buildPreset, type Ecosystem, type PackageManager } from "../build";
+import AppDetails from "../components/AppDetails.vue";
 import UiCheckbox from "../components/ui/UiCheckbox.vue";
 import UiSelect from "../components/ui/UiSelect.vue";
 import {
@@ -46,6 +47,9 @@ const apps = ref<App[]>([]);
 const deployments = ref<Deployment[]>([]);
 const repositories = ref<Repository[]>([]);
 const adding = ref(false);
+const editing = ref<number | null>(null);
+const detailAppId = ref<number | null>(null);
+const detailsOpen = ref(false);
 const loadingRepositories = ref(false);
 const form = reactive({
   repository: "",
@@ -54,9 +58,23 @@ const form = reactive({
   ...buildPreset("none"),
   spa: false,
 });
+const repositoryOptions = computed(() => {
+  const options = repositories.value.map((repo) => ({
+    value: repo.fullName,
+    label: repo.fullName,
+  }));
+  if (
+    editing.value !== null &&
+    form.repository &&
+    !options.some((option) => option.value === form.repository)
+  )
+    options.unshift({ value: form.repository, label: form.repository });
+  return options;
+});
 let timer: ReturnType<typeof setTimeout> | undefined;
 let stopped = false;
 let formTrigger: HTMLElement | null = null;
+let detailTrigger: HTMLElement | null = null;
 
 async function refresh() {
   try {
@@ -105,6 +123,8 @@ async function signOut() {
   try {
     await request("/session", { method: "DELETE" });
     authenticated.value = false;
+    detailsOpen.value = false;
+    adding.value = false;
     apps.value = [];
     deployments.value = [];
     clearTimeout(timer);
@@ -113,8 +133,34 @@ async function signOut() {
   }
 }
 
-async function openForm() {
-  formTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+function openDetails(app: App) {
+  detailTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  detailAppId.value = app.id;
+  detailsOpen.value = true;
+}
+async function openForm(app?: App) {
+  detailsOpen.value = false;
+  editing.value = app?.id ?? null;
+  Object.assign(
+    form,
+    app
+      ? {
+          repository: app.repository,
+          branch: app.branch,
+          domain: app.domain,
+          buildConfig: { ...app.buildConfig },
+          installCommand: app.installCommand,
+          buildCommand: app.buildCommand,
+          outputDirectory: app.outputDirectory,
+          spa: app.spa,
+        }
+      : { repository: "", branch: "main", domain: "", ...buildPreset("none"), spa: false },
+  );
+  formTrigger = app
+    ? detailTrigger
+    : document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
   adding.value = true;
   loadingRepositories.value = true;
   error.value = "";
@@ -126,6 +172,11 @@ async function openForm() {
   } finally {
     loadingRepositories.value = false;
   }
+}
+
+function restoreDetailFocus(event: Event) {
+  event.preventDefault();
+  if (!adding.value && detailTrigger?.isConnected) detailTrigger.focus({ preventScroll: true });
 }
 
 function restoreFormFocus(event: Event) {
@@ -157,9 +208,15 @@ async function addApp() {
   notice.value = "";
 
   try {
-    await request("/apps", { method: "POST", body: body("apps", form) });
+    await request(editing.value === null ? "/apps" : `/apps/${editing.value}`, {
+      method: editing.value === null ? "POST" : "PUT",
+      body: body("apps", form),
+    });
     adding.value = false;
-    notice.value = "Workflow PR opened. Review and merge it on GitHub to enable deployments.";
+    notice.value =
+      editing.value === null
+        ? "Workflow PR opened. Review and merge it on GitHub to enable deployments."
+        : "Settings saved. Domain and routing updates are queued for the worker. Update the workflow PR to apply build changes.";
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : "Could not add the app.";
   } finally {
@@ -214,7 +271,9 @@ const filteredDeployments = computed(() =>
     );
   }),
 );
-const liveApps = computed(() => apps.value.filter((app) => latest(app)?.status === "live").length);
+const liveApps = computed(
+  () => apps.value.filter((app) => !app.deletionRequested && latest(app)?.status === "live").length,
+);
 const attentionApps = computed(
   () => apps.value.filter((app) => !latest(app) || latest(app)?.status === "failed").length,
 );
@@ -367,7 +426,7 @@ onUnmounted(() => {
               }}
             </p>
           </div>
-          <UiButton v-if="authenticated" class="primary" :disabled="busy" @click="openForm"
+          <UiButton v-if="authenticated" class="primary" :disabled="busy" @click="openForm()"
             ><UiIcon name="plus" />New application</UiButton
           >
         </div>
@@ -481,7 +540,7 @@ onUnmounted(() => {
                   Connect a GitHub repository. Deployer opens a build workflow PR and brings the
                   finished app to your server.
                 </p>
-                <UiButton class="primary" :disabled="busy" @click="openForm"
+                <UiButton class="primary" :disabled="busy" @click="openForm()"
                   ><UiIcon name="plus" />Connect repository</UiButton
                 ><span class="empty-footnote">Your code stays on GitHub. Your app lives here.</span>
               </div>
@@ -526,8 +585,13 @@ onUnmounted(() => {
                     </div>
                   </div>
                   <div class="application-deployment">
-                    <span class="deployment-status" :data-status="latest(app)?.status"
-                      ><span class="state-dot"></span>{{ statusLabel(latest(app)?.status) }}</span
+                    <span
+                      class="deployment-status"
+                      :data-status="app.deletionRequested ? 'deleting' : latest(app)?.status"
+                      ><span class="state-dot"></span
+                      >{{
+                        app.deletionRequested ? "Deleting" : statusLabel(latest(app)?.status)
+                      }}</span
                     ><span v-if="latest(app)" class="deployment-stamp"
                       ><code>{{ latest(app)!.commitSha.slice(0, 7) }}</code
                       ><time :datetime="new Date(latest(app)!.createdAt * 1000).toISOString()">{{
@@ -536,6 +600,7 @@ onUnmounted(() => {
                     ><span v-else class="deployment-stamp">Merge your workflow PR to begin</span>
                   </div>
                   <div class="application-action">
+                    <UiButton class="details-button" @click="openDetails(app)">Details</UiButton>
                     <a
                       v-if="app.workflowPr"
                       class="workflow-link"
@@ -543,7 +608,10 @@ onUnmounted(() => {
                       target="_blank"
                       rel="noopener noreferrer"
                       >Workflow PR<UiIcon name="arrow" /></a
-                    ><UiButton v-else :disabled="busy" @click="retryWorkflow(app)"
+                    ><UiButton
+                      v-else
+                      :disabled="busy || app.deletionRequested"
+                      @click="retryWorkflow(app)"
                       >Retry workflow</UiButton
                     >
                   </div>
@@ -630,6 +698,13 @@ onUnmounted(() => {
       </footer>
     </div>
 
+    <AppDetails
+      v-model:open="detailsOpen"
+      :app-id="detailAppId"
+      @close-auto-focus="restoreDetailFocus"
+      @edit="openForm"
+      @changed="refresh"
+    />
     <DialogRoot v-model:open="adding"
       ><DialogPortal
         ><DialogOverlay class="console-dialog-overlay" /><DialogContent
@@ -645,11 +720,14 @@ onUnmounted(() => {
                 ><UiIcon name="close" /></UiButton
             ></DialogClose>
           </div>
-          <DialogTitle class="drawer-title">Connect a repository</DialogTitle
-          ><DialogDescription class="drawer-description"
-            >Give your next app a home. We’ll open a pull request with your build workflow for you
-            to review.</DialogDescription
-          >
+          <DialogTitle class="drawer-title">{{
+            editing === null ? "Connect a repository" : "Edit application"
+          }}</DialogTitle
+          ><DialogDescription class="drawer-description">{{
+            editing === null
+              ? "Give your next app a home. We’ll open a pull request with your build workflow for you to review."
+              : "Update your source, build, and destination settings. Build changes require an updated workflow PR."
+          }}</DialogDescription>
           <p v-if="error" class="console-message is-error" role="alert">{{ error }}</p>
           <form class="drawer-form" @submit.prevent="addApp">
             <fieldset :disabled="busy">
@@ -660,9 +738,7 @@ onUnmounted(() => {
                 v-model="form.repository"
                 name="repository"
                 required
-                :options="
-                  repositories.map((repo) => ({ value: repo.fullName, label: repo.fullName }))
-                "
+                :options="repositoryOptions"
                 :placeholder="loadingRepositories ? 'Loading repositories…' : 'Select a repository'"
                 :disabled="busy || loadingRepositories"
                 @update:model-value="chooseRepository"
@@ -766,7 +842,8 @@ onUnmounted(() => {
                 autocapitalize="none"
               />
               <p class="field-hint">
-                Point DNS at your VPS. Configure TLS with your certificate tooling.
+                Point DNS at your VPS. Configure TLS with your certificate tooling. If you change
+                the domain, update its certificate too.
               </p>
               <Label for="spa" class="checkbox"
                 ><UiCheckbox id="spa" v-model="form.spa" :disabled="busy" />Enable SPA
@@ -780,7 +857,15 @@ onUnmounted(() => {
                 type="submit"
                 class="primary"
                 :disabled="busy || loadingRepositories || !form.repository"
-                >{{ busy ? "Opening PR…" : "Create workflow PR" }}<UiIcon name="arrow"
+                >{{
+                  busy
+                    ? editing === null
+                      ? "Opening PR…"
+                      : "Saving…"
+                    : editing === null
+                      ? "Create workflow PR"
+                      : "Save settings"
+                }}<UiIcon name="arrow"
               /></UiButton>
             </div>
           </form> </DialogContent></DialogPortal

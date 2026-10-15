@@ -23,6 +23,7 @@ impl TryFrom<models::App> for domain::App {
             output_directory: app.output_directory,
             spa: app.spa,
             workflow_pr: app.workflow_pr,
+            deletion_requested: app.deleted_at.is_some(),
         })
     }
 }
@@ -52,6 +53,8 @@ pub(super) fn job_task(job: &models::Job) -> anyhow::Result<domain::JobTask> {
 
             Ok(domain::JobTask::Email(email))
         }
+        ("app_config", None, Some(payload)) => Ok(domain::JobTask::SyncApp(payload.parse()?)),
+        ("app_remove", None, Some(payload)) => Ok(domain::JobTask::RemoveApp(payload.parse()?)),
         _ => anyhow::bail!("invalid job payload"),
     }
 }

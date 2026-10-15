@@ -18,6 +18,7 @@ pub struct App {
     pub output_directory: String,
     pub spa: bool,
     pub workflow_pr: Option<String>,
+    pub deletion_requested: bool,
 }
 
 #[derive(Clone, Deserialize)]
@@ -146,13 +147,15 @@ pub struct Job {
 pub enum JobTask {
     Deployment(u64),
     Email(crate::mail::Email),
+    SyncApp(u64),
+    RemoveApp(u64),
 }
 
 impl Job {
     pub fn deployment_id(&self) -> Option<u64> {
         match &self.task {
             JobTask::Deployment(id) => Some(*id),
-            JobTask::Email(_) => None,
+            JobTask::Email(_) | JobTask::SyncApp(_) | JobTask::RemoveApp(_) => None,
         }
     }
 }

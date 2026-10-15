@@ -42,3 +42,16 @@ impl Store {
         Ok(row.is_some())
     }
 }
+
+impl Store {
+    pub async fn app_deployments(&self, app_id: u64) -> anyhow::Result<Vec<DeploymentInfo>> {
+        Ok(Deployment::filter_by_app_id(app_id)
+            .order_by(Deployment::fields().id().desc())
+            .limit(100)
+            .exec(&mut self.db.clone())
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+}

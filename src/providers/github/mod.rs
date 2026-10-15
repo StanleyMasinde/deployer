@@ -205,9 +205,11 @@ impl SourceProvider for Github {
                 query.query().unwrap_or_default()
             ))
             .await?;
-        if let Some(pr) = prs.as_array().and_then(|a| a.first()) {
-            return Ok(pr["html_url"].as_str().context("PR URL")?.into());
-        }
+        let open_pr = prs
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|pr| pr["html_url"].as_str())
+            .map(str::to_owned);
 
         let reference = self
             .request(
@@ -248,6 +250,9 @@ impl SourceProvider for Github {
             .send()
             .await?
             .error_for_status()?;
+        if let Some(url) = open_pr {
+            return Ok(url);
+        }
         let pr = self.post(&format!("{prefix}/pulls"),json!({"title":"Build and deploy static app with Deployer", "head":branch,"base":app.branch,"body":"Builds run on GitHub Actions. Deployer downloads the successful artifact after a signed workflow_run webhook. Review the build commands and output directory before merging."})).await?;
 
         Ok(pr["html_url"].as_str().context("PR URL")?.into())

@@ -36,3 +36,8 @@ it("surfaces protocol errors and supports empty responses", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
   expect(await request("/session", { method: "DELETE" })).toBeUndefined();
 });
+
+it("accepts queued application deletion without a JSON response", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 202 })));
+  expect(await request("/apps/1", { method: "DELETE" })).toBeUndefined();
+});

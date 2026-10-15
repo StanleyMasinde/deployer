@@ -5,6 +5,7 @@ use anyhow::{Context, ensure};
 use std::{
     future::Future,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 pub trait Activator {
@@ -15,26 +16,64 @@ struct Nginx<'a>(&'a Worker);
 
 impl Activator for Nginx<'_> {
     async fn activate(&self, app: &App) -> anyhow::Result<()> {
-        let command = tokio::process::Command::new("sudo")
-            .arg("-n")
-            .arg(&self.0.nginx_helper)
-            .arg(app.id.to_string())
-            .arg(&app.domain)
-            .arg(if app.spa { "spa" } else { "static" })
-            .kill_on_drop(true)
-            .output();
-
-        let output = tokio::time::timeout(std::time::Duration::from_secs(30), command)
-            .await
-            .context("Nginx activation timed out")??;
-
-        if !output.status.success() {
-            tracing::error!(stderr = %String::from_utf8_lossy(&output.stderr), "Nginx helper failed");
-            anyhow::bail!("Nginx activation failed; check the worker and Nginx service logs");
-        }
-
+        nginx_command(
+            self.0,
+            app.id,
+            &app.domain,
+            if app.spa { "spa" } else { "static" },
+        )
+        .await?;
         Ok(())
     }
+}
+
+async fn nginx_command(config: &Worker, id: u64, domain: &str, mode: &str) -> anyhow::Result<()> {
+    crate::domain::validate_domain(domain)?;
+    let output = tokio::time::timeout(
+        Duration::from_secs(30),
+        tokio::process::Command::new("sudo")
+            .arg("-n")
+            .arg(&config.nginx_helper)
+            .arg(id.to_string())
+            .arg(domain)
+            .arg(mode)
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .context("Nginx operation timed out")??;
+    if !output.status.success() {
+        tracing::error!(stderr = %String::from_utf8_lossy(&output.stderr), "Nginx helper failed");
+        anyhow::bail!("Nginx operation failed; check the worker and Nginx service logs");
+    }
+    Ok(())
+}
+
+pub async fn sync_app(config: &Worker, app: &App) -> anyhow::Result<()> {
+    if config
+        .apps_root
+        .join(app.id.to_string())
+        .join("current")
+        .exists()
+    {
+        nginx_command(
+            config,
+            app.id,
+            &app.domain,
+            if app.spa { "sync-spa" } else { "sync-static" },
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+pub async fn remove_app(config: &Worker, app: &App) -> anyhow::Result<()> {
+    nginx_command(config, app.id, &app.domain, "remove").await?;
+    let directory = config.apps_root.join(app.id.to_string());
+    if directory.exists() {
+        std::fs::remove_dir_all(directory)?;
+    }
+    Ok(())
 }
 
 pub async fn publish(config: &Worker, app: &App, staging: &Path) -> anyhow::Result<()> {
