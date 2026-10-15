@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, computed, onUnmounted } from "vue";
 import {
   DialogRoot,
   DialogPortal,
@@ -18,6 +18,7 @@ import {
   AlertDialogCancel,
   Label,
 } from "reka-ui";
+import { httpsStatus, appUrl } from "../https";
 import { request, type App, type Deployment } from "../api/client";
 import UiButton from "./ui/UiButton.vue";
 import UiInput from "./ui/UiInput.vue";
@@ -36,6 +37,44 @@ const loading = ref(false),
   error = ref(""),
   confirming = ref(false),
   confirmation = ref("");
+const certificateStatus = computed(() =>
+  app.value ? httpsStatus(app.value.domain, app.value.https) : "disabled",
+);
+let poll: ReturnType<typeof setInterval> | undefined;
+watch(
+  () => props.open,
+  (open) => {
+    clearInterval(poll);
+    if (open)
+      poll = setInterval(async () => {
+        if (busy.value || confirming.value || !app.value) return;
+        const id = props.appId;
+        try {
+          const record = await request<App>(`/apps/${id}`);
+          if (props.open && props.appId === id) app.value = record;
+        } catch {
+          /* Retry on the next poll. */
+        }
+      }, 5000);
+  },
+);
+onUnmounted(() => {
+  clearInterval(poll);
+  generation++;
+});
+async function enableHttps() {
+  if (!app.value) return;
+  busy.value = true;
+  error.value = "";
+  try {
+    app.value = await request<App>(`/apps/${app.value.id}/https`, { method: "POST" });
+    emit("changed");
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "Could not request HTTPS.";
+  } finally {
+    busy.value = false;
+  }
+}
 let generation = 0;
 async function load() {
   const current = ++generation;
@@ -129,11 +168,7 @@ async function workflow() {
           <div class="detail-actions">
             <UiButton :disabled="busy || app.deletionRequested" @click="emit('edit', app)"
               >Edit settings</UiButton
-            ><a
-              class="button"
-              :href="`http://${app.domain}`"
-              target="_blank"
-              rel="noopener noreferrer"
+            ><a class="button" :href="appUrl(app)" target="_blank" rel="noopener noreferrer"
               >Visit site<UiIcon name="arrow"
             /></a>
           </div>
@@ -166,6 +201,56 @@ async function workflow() {
                 <dd>{{ app.spa ? "Single-page application" : "Static files" }}</dd>
               </div>
             </dl>
+          </section>
+          <section class="detail-section">
+            <h2>HTTPS</h2>
+            <p role="status">
+              <span
+                class="deployment-status"
+                :data-status="
+                  certificateStatus === 'active'
+                    ? 'live'
+                    : certificateStatus === 'failed' || certificateStatus === 'expired'
+                      ? 'failed'
+                      : 'queued'
+                "
+                >{{
+                  {
+                    disabled: "Not enabled",
+                    pending: "Certificate pending",
+                    active: "HTTPS active",
+                    failed: "Certificate failed",
+                    expired: "Certificate expired",
+                  }[certificateStatus]
+                }}</span
+              >
+            </p>
+            <p v-if="app.https?.expiresAt && app.https.domain === app.domain" class="field-hint">
+              Certificate expires {{ new Date(app.https.expiresAt * 1000).toLocaleString() }}.
+              Renewal is automatic.
+            </p>
+            <p v-if="app.https?.error" class="console-message is-error" role="alert">
+              {{ app.https.error }}
+            </p>
+            <p v-if="certificateStatus === 'disabled'" class="field-hint">
+              Point this domain’s DNS at the VPS and allow incoming traffic on ports 80 and 443.
+              Deployer obtains and renews a Let’s Encrypt certificate.
+            </p>
+            <p v-if="certificateStatus === 'pending'" class="field-hint">
+              The worker is requesting your certificate. This view updates automatically.
+            </p>
+            <UiButton
+              v-if="certificateStatus !== 'active' || app.https?.error"
+              :disabled="busy || app.deletionRequested || certificateStatus === 'pending'"
+              @click="enableHttps"
+              >{{
+                busy
+                  ? "Requesting…"
+                  : certificateStatus === "disabled"
+                    ? "Enable HTTPS"
+                    : "Retry certificate"
+              }}</UiButton
+            >
           </section>
           <section class="detail-section">
             <h2>Build configuration</h2>

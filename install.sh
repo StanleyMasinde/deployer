@@ -14,7 +14,7 @@ if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
   fail 'This release supports Linux x86_64 only.'
 fi
 
-for tool in curl tar sha256sum systemctl nginx sudo flock openssl install getent useradd groupadd runuser visudo grep sed; do
+for tool in curl tar sha256sum systemctl nginx sudo flock openssl install getent useradd groupadd runuser visudo grep sed awk date; do
   command -v "$tool" >/dev/null 2>&1 || fail "Missing prerequiapp: $tool. Install it and run this installer again."
 done
 
@@ -45,6 +45,12 @@ release="$work/release"
 if [ ! -s "$release/assets/$version/index.html" ] || [ ! -s "$release/assets/$version/spa.html" ]; then
   fail 'Release frontend is incomplete.'
 fi
+
+# Pin the certificate client and verify it before stopping existing services.
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://raw.githubusercontent.com/acmesh-official/acme.sh/3.1.6/acme.sh \
+  -o "$work/acme.sh"
+printf '%s  %s\n' c7d68b021cfd6380ea83a82962abde5b484779fee0b97d38681dfa1396bbc8d7 "$work/acme.sh" | sha256sum -c -
 
 if ! getent group deployer >/dev/null; then
   groupadd --system deployer
@@ -150,12 +156,18 @@ DEPLOYER_CONFIG=/etc/deployer/config.toml runuser -u deployer -- /usr/local/libe
 rm -f /usr/local/libexec/deployer-check
 
 # Keep configuration and secrets across upgrades. Binaries and frontend are one unit.
-systemctl stop deployer-worker.service deployer.service 2>/dev/null || true
+systemctl stop deployer-acme.timer deployer-acme.service deployer-worker.service deployer.service 2>/dev/null || true
 
 install -m 755 "$release/bin/deployer" /usr/local/bin/deployer
 install -m 755 "$release/bin/deployer-worker" /usr/local/bin/deployer-worker
 install -m 755 "$release/bin/deployer-migrate" /usr/local/bin/deployer-migrate
 install -m 755 -o root -g root "$release/deploy/nginx-helper.sh" /usr/local/libexec/deployer-nginx
+install -d -m 755 -o root -g root /opt/deployer/acme /var/lib/deployer/acme-webroot
+install -d -m 700 -o root -g root /var/lib/deployer/acme /etc/deployer/tls
+install -m 755 -o root -g root "$work/acme.sh" /opt/deployer/acme/acme.sh
+install -m 755 -o root -g root "$release/deploy/acme-helper.sh" /usr/local/libexec/deployer-acme
+install -m 644 "$release/deploy/deployer-acme.service" /etc/systemd/system/deployer-acme.service
+install -m 644 "$release/deploy/deployer-acme.timer" /etc/systemd/system/deployer-acme.timer
 install -m 644 "$release/deploy/deployer.service" /etc/systemd/system/deployer.service
 install -m 644 "$release/deploy/deployer-worker.service" /etc/systemd/system/deployer-worker.service
 install -m 644 "$release/deploy/control-panel.nginx.conf" /etc/deployer/control-panel.nginx.conf
@@ -173,7 +185,7 @@ chmod -R a+rX "/var/lib/deployer/assets/$version"
 systemctl daemon-reload
 
 # The web server applies embedded migrations on boot. ExecStartPost gates the worker.
-systemctl enable --now deployer.service deployer-worker.service
+systemctl enable --now deployer.service deployer-worker.service deployer-acme.timer
 DEPLOYER_CONFIG=/etc/deployer/config.toml runuser -u deployer -- /usr/local/bin/deployer ready
 
 # There is no local release retention; rollback downloads a version from GitHub.
@@ -187,3 +199,4 @@ printf 'Configure the control panel proxy using /etc/deployer/control-panel.ngin
 printf 'Open YOUR_PUBLIC_URL/setup to create your root account.\n'
 printf 'Read the one-time setup code with: sudo cat /var/lib/deployer/state/setup-code\n'
 printf 'Webhook: YOUR_PUBLIC_URL/api/webhooks/github\n'
+printf 'Enable HTTPS for each app in the console after pointing DNS at this VPS.\n'

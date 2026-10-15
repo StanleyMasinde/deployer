@@ -9,6 +9,7 @@ fn config(path: &Path) -> Worker {
     Worker {
         apps_root: path.into(),
         nginx_helper: "/unused".into(),
+        https_helper: "/unused".into(),
         max_artifact_bytes: 1024,
         max_extracted_bytes: 4096,
         poll_seconds: 1,
@@ -29,6 +30,7 @@ fn app() -> App {
         spa: false,
         workflow_pr: None,
         deletion_requested: false,
+        https: Default::default(),
     }
 }
 

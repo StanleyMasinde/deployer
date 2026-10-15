@@ -111,3 +111,19 @@ fn plain_static_api_input_needs_no_commands() {
     assert!(input.install_command.is_empty());
     assert!(input.build_command.is_empty());
 }
+
+#[test]
+fn https_status_requires_a_live_certificate_for_the_current_hostname() {
+    use deployer::domain::Https;
+    let mut cert = Https::default();
+    assert_eq!(cert.status("site.example.com", 100), "disabled");
+    cert.enabled = true;
+    assert_eq!(cert.status("site.example.com", 100), "pending");
+    cert.error = Some("issuance failed".into());
+    assert_eq!(cert.status("site.example.com", 100), "failed");
+    cert.domain = Some("site.example.com".into());
+    cert.expires_at = Some(200);
+    assert_eq!(cert.status("site.example.com", 100), "active");
+    assert_eq!(cert.status("site.example.com", 200), "expired");
+    assert_eq!(cert.status("other.example.com", 100), "failed");
+}

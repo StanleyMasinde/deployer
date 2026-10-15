@@ -26,7 +26,14 @@ pub async fn run(
     let shutdown = crate::shutdown();
     tokio::pin!(shutdown);
 
+    let mut https_check = std::time::Instant::now() - Duration::from_secs(60);
     loop {
+        if https_check.elapsed() >= Duration::from_secs(60) {
+            if let Err(error) = crate::https::refresh(&store, &config).await {
+                tracing::error!(%error, "HTTPS status refresh failed");
+            }
+            https_check = std::time::Instant::now();
+        }
         // Finish the current job before graceful shutdown.
         if let Err(error) = process_one(&store, provider.as_ref(), &config, &mailer).await {
             tracing::error!(%error,"worker operation failed");
@@ -72,7 +79,7 @@ pub async fn process_one(
                 store.finish(job.id, "failed", Some(failure.code)).await
             };
         }
-        JobTask::SyncApp(id) | JobTask::RemoveApp(id) => {
+        JobTask::SyncApp(id) | JobTask::RemoveApp(id) | JobTask::EnableHttps(id) => {
             let remove = matches!(job.task, JobTask::RemoveApp(_));
             let result = async {
                 let app = match store.find_app(*id).await {
@@ -93,14 +100,22 @@ pub async fn process_one(
                         "application is not marked for deletion"
                     );
                     // Apps that have never deployed have no Nginx config or published files.
-                    if config.apps_root.join(app.id.to_string()).exists()
+                    if app.https.enabled
+                        || config.apps_root.join(app.id.to_string()).exists()
                         || !store.app_deployments(app.id).await?.is_empty()
                     {
                         publishing::remove_app(config, &app).await?;
                     }
+                    if app.https.enabled {
+                        crate::https::cleanup(config, &app).await?;
+                    }
                     store.purge_app(app.id).await?;
                 } else if !app.deletion_requested {
-                    publishing::sync_app(config, &app).await?;
+                    if app.https.enabled {
+                        crate::https::enable(store, config, &app).await?;
+                    } else {
+                        publishing::sync_app(config, &app).await?;
+                    }
                 }
                 Ok::<(), anyhow::Error>(())
             }
