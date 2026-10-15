@@ -72,6 +72,49 @@ pub async fn process_one(
                 store.finish(job.id, "failed", Some(failure.code)).await
             };
         }
+        JobTask::SyncApp(id) | JobTask::RemoveApp(id) => {
+            let remove = matches!(job.task, JobTask::RemoveApp(_));
+            let result = async {
+                let app = match store.find_app(*id).await {
+                    Ok(app) => app,
+                    Err(e)
+                        if matches!(
+                            e.downcast_ref::<crate::storage::AppError>(),
+                            Some(crate::storage::AppError::NotFound)
+                        ) =>
+                    {
+                        return Ok(());
+                    }
+                    Err(e) => return Err(e),
+                };
+                if remove {
+                    anyhow::ensure!(
+                        app.deletion_requested,
+                        "application is not marked for deletion"
+                    );
+                    // Apps that have never deployed have no Nginx config or published files.
+                    if config.apps_root.join(app.id.to_string()).exists()
+                        || !store.app_deployments(app.id).await?.is_empty()
+                    {
+                        publishing::remove_app(config, &app).await?;
+                    }
+                    store.purge_app(app.id).await?;
+                } else if !app.deletion_requested {
+                    publishing::sync_app(config, &app).await?;
+                }
+                Ok::<(), anyhow::Error>(())
+            }
+            .await;
+            return match result {
+                Ok(()) => store.finish(job.id, "completed", None).await,
+                Err(error) if job.attempts < 3 => store.retry(job.id, &error.to_string()).await,
+                Err(error) => {
+                    store
+                        .finish(job.id, "failed", Some(&error.to_string()))
+                        .await
+                }
+            };
+        }
         JobTask::Deployment(id) => *id,
     };
 
@@ -83,6 +126,7 @@ pub async fn process_one(
 
     let result = async {
         let app = store.app(deployment.app_id).await?;
+        anyhow::ensure!(!app.deletion_requested, "application is being deleted");
         anyhow::ensure!(app.provider == provider.name(), "provider mismatch");
         let build = BuildCompleted {
             repository: app.repository.clone(),

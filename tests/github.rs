@@ -66,6 +66,7 @@ fn vite_workflow_builds_and_uploads_static_output_on_github() {
         output_directory: "dist".into(),
         spa: false,
         workflow_pr: None,
+        deletion_requested: false,
     };
     let yaml = workflow::render(&app);
 
@@ -99,6 +100,7 @@ fn workflow_app() -> App {
         output_directory: "public/site".into(),
         spa: false,
         workflow_pr: None,
+        deletion_requested: false,
     }
 }
 

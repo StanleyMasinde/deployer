@@ -455,6 +455,7 @@ async fn check_http(store: Store, database_url: &str) {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("DELETE")
@@ -477,6 +478,14 @@ async fn check_http(store: Store, database_url: &str) {
         "Zoë Masinde"
     );
     check_mail_queue(&cleanup_store, current_provider.as_ref(), &config.worker).await;
+    check_app_crud(
+        &app,
+        &cleanup_store,
+        &cookie,
+        current_provider.as_ref(),
+        &config.worker,
+    )
+    .await;
 
     toasty::sql::statement("DELETE FROM users WHERE id = 1")
         .exec(&mut cleanup_store.database())
@@ -617,6 +626,243 @@ async fn check_mail_queue(
 
     for id in [welcome.id, first, second] {
         toasty::sql::statement("DELETE FROM jobs WHERE id = ?")
+            .bind(id)
+            .exec(&mut store.database())
+            .await
+            .unwrap();
+    }
+}
+
+async fn check_app_crud(
+    router: &axum::Router,
+    store: &Store,
+    cookie: &str,
+    provider: &impl deployer::providers::SourceProvider,
+    worker: &deployer::config::Worker,
+) {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use deployer::domain::JobTask;
+    use tower::ServiceExt;
+    let nonce = rand::random::<u32>();
+    let mut input = NewApp {
+        repository: format!("test/crud-{nonce}"),
+        branch: "main".into(),
+        domain: format!("crud-{nonce}.example.com"),
+        build_config: Default::default(),
+        install_command: "npm ci".into(),
+        build_command: "npm run build".into(),
+        output_directory: "dist".into(),
+        spa: false,
+    };
+    let record = store.create_app("github", &input).await.unwrap();
+    store
+        .set_pr(record.id, "https://github.com/test/site/pull/1")
+        .await
+        .unwrap();
+    let uri = format!("/api/apps/{}", record.id);
+    let req = |method: &str, uri: &str, data: Option<serde_json::Value>, origin: bool| {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("cookie", cookie)
+            .header("content-type", "application/vnd.api+json");
+        if origin {
+            builder = builder.header("origin", "http://127.0.0.1:8080");
+        }
+        builder
+            .body(
+                data.map(|d| Body::from(d.to_string()))
+                    .unwrap_or_else(Body::empty),
+            )
+            .unwrap()
+    };
+    let response = router
+        .clone()
+        .oneshot(req("GET", &uri, None, false))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(json["data"]["attributes"]["domain"], input.domain);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(req("GET", "/api/apps/18446744073709551615", None, false))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let build = BuildCompleted {
+        repository: record.repository.clone(),
+        branch: "main".into(),
+        run_id: u64::from(nonce),
+        attempt: 1,
+        commit_sha: "a".repeat(40),
+    };
+    store.enqueue(&record, &build).await.unwrap();
+    let deployment_job = store.next().await.unwrap().unwrap();
+    assert!(matches!(deployment_job.task, JobTask::Deployment(_)));
+    store.finish(deployment_job.id, "live", None).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(req("GET", &format!("{uri}/deployments"), None, false))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(json["data"].as_array().unwrap().len(), 1);
+    input.domain = format!("updated-{nonce}.example.com");
+    input.spa = true;
+    let body = |input: &NewApp| serde_json::json!({"data":{"type":"apps","attributes":{"repository":input.repository,"branch":input.branch,"domain":input.domain,"buildConfig":input.build_config,"installCommand":input.install_command,"buildCommand":input.build_command,"outputDirectory":input.output_directory,"spa":input.spa}}});
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(req("PUT", &uri, Some(body(&input)), false))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(req("PUT", &uri, Some(body(&input)), true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let saved = store.find_app(record.id).await.unwrap();
+    assert_eq!(saved.domain, input.domain);
+    assert!(saved.spa);
+    assert!(saved.workflow_pr.is_some());
+    input.build_command = "npm run build -- --base=/".into();
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(req("PUT", &uri, Some(body(&input)), true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    assert!(
+        store
+            .find_app(record.id)
+            .await
+            .unwrap()
+            .workflow_pr
+            .is_none()
+    );
+    for _ in 0..2 {
+        let job = store.next().await.unwrap().unwrap();
+        assert!(matches!(job.task, JobTask::SyncApp(id) if id == record.id));
+        store.finish(job.id, "completed", None).await.unwrap();
+    }
+    let mut invalid = input.clone();
+    invalid.domain = "invalid domain".into();
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(req("PUT", &uri, Some(body(&invalid)), true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let other_input = NewApp {
+        repository: format!("test/other-{nonce}"),
+        domain: format!("other-{nonce}.example.com"),
+        ..input.clone()
+    };
+    let other = store.create_app("github", &other_input).await.unwrap();
+    invalid = input.clone();
+    invalid.domain = other.domain;
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(req("PUT", &uri, Some(body(&invalid)), true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(req("DELETE", &uri, None, false))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(req("DELETE", &uri, None, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    assert!(store.find_app(record.id).await.unwrap().deletion_requested);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(req("PUT", &uri, Some(body(&input)), true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let stale = BuildCompleted {
+        run_id: build.run_id + 1,
+        ..build
+    };
+    store.enqueue(&record, &stale).await.unwrap();
+    assert_eq!(store.app_deployments(record.id).await.unwrap().len(), 1);
+    let job = store.next().await.unwrap().unwrap();
+    assert!(matches!(job.task, JobTask::RemoveApp(id) if id == record.id));
+    store.purge_app(record.id).await.unwrap();
+    store.finish(job.id, "completed", None).await.unwrap();
+    assert!(store.next().await.unwrap().is_none());
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(req("GET", &uri, None, false))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert!(store.app_deployments(record.id).await.unwrap().is_empty());
+    let recreated = store.create_app("github", &input).await.unwrap();
+    let local = tempfile::tempdir().unwrap();
+    let mut local_worker = worker.clone();
+    local_worker.apps_root = local.path().join("apps");
+    store.request_app_deletion(recreated.id).await.unwrap();
+    deployer::worker::process_one(
+        store,
+        provider,
+        &local_worker,
+        &TestMailer {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+            failure: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(store.find_app(recreated.id).await.is_err());
+    for id in [other.id] {
+        toasty::sql::statement("DELETE FROM apps WHERE id = ?")
             .bind(id)
             .exec(&mut store.database())
             .await

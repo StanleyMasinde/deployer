@@ -13,6 +13,23 @@ impl Store {
         let mut db = self.db.clone();
         let mut transaction = db.transaction().await?;
 
+        toasty::sql::statement("UPDATE apps SET id = id WHERE id = ?")
+            .bind(app.id)
+            .exec(&mut transaction)
+            .await?;
+        let current = super::models::App::filter_by_id(app.id)
+            .first()
+            .exec(&mut transaction)
+            .await?;
+        let Some(current) = current else {
+            return Ok(());
+        };
+        if current.deleted_at.is_some()
+            || current.branch != build.branch
+            || !current.repository.eq_ignore_ascii_case(&build.repository)
+        {
+            return Ok(());
+        }
         // Both rows are committed together, including concurrent webhook redeliveries.
         toasty::sql::statement(
             "INSERT INTO deployments

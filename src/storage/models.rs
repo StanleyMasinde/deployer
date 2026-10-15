@@ -32,6 +32,7 @@ pub struct App {
     pub spa: bool,
     #[column(type = text)]
     pub workflow_pr: Option<String>,
+    pub deleted_at: Option<i64>,
 }
 
 #[derive(toasty::Model)]

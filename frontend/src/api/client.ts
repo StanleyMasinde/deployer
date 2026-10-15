@@ -35,7 +35,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
     },
   });
 
-  if (response.status === 204) return undefined as T;
+  if (response.status === 204 || response.status === 202) return undefined as T;
 
   const document: Document = await response.json();
 
@@ -55,6 +55,10 @@ export function body(type: string, attributes: object): string {
 
 export type App = {
   buildConfig: BuildConfig;
+  installCommand: string;
+  buildCommand: string;
+  outputDirectory: string;
+  deletionRequested: boolean;
   id: number;
   repository: string;
   branch: string;

@@ -1,4 +1,5 @@
 mod apps;
+pub use apps::AppError;
 pub mod db;
 mod deployments;
 mod jobs;

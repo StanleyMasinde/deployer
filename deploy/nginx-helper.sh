@@ -18,8 +18,9 @@ case "$app_id" in ''|*[!0-9]*) exit 2 ;; esac
 printf '%s\n' "$domain" | grep -Eq '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$' || exit 2
 
 case "$mode" in
-  spa) fallback='/index.html' ;;
-  static) fallback='=404' ;;
+  spa|sync-spa) fallback='/index.html' ;;
+  static|sync-static) fallback='=404' ;;
+  remove) fallback='' ;;
   *) exit 2 ;;
 esac
 
@@ -28,11 +29,25 @@ exec 9>/run/lock/deployer-nginx.lock
 flock -x 9
 
 config="/etc/nginx/conf.d/deployer-${app_id}.conf"
-# App settings are immutable in the MVP. Preserve operator-added TLS settings.
-if [ -f "$config" ]; then
+# Activation preserves operator-added TLS settings. Explicit sync updates managed directives.
+if [ -f "$config" ] && { [ "$mode" = spa ] || [ "$mode" = static ]; }; then
   nginx -t
   systemctl reload nginx
   exit 0
+fi
+
+if [ "$mode" = remove ]; then
+  [ -f "$config" ] || exit 0
+  backup=$(mktemp /etc/nginx/conf.d/.deployer-backup.XXXXXX)
+  cp "$config" "$backup"
+  rm -f "$config"
+  if nginx -t && systemctl reload nginx; then
+    rm -f "$backup"
+    exit 0
+  fi
+  mv -f "$backup" "$config"
+  nginx -t && systemctl reload nginx
+  exit 1
 fi
 
 backup=$(mktemp /etc/nginx/conf.d/.deployer-backup.XXXXXX)
@@ -46,6 +61,17 @@ fi
 
 trap 'rm -f "$backup" "$staged"' EXIT HUP INT TERM
 
+if [ "$had_config" = true ]; then
+  # Keep certificates, redirects, and operator directives intact.
+  awk -v domain="$domain" -v fallback="$fallback" '
+    $1 == "server_name" { print "    server_name " domain ";"; names++; next }
+    $1 == "try_files" && $2 == "$uri" && $3 == "$uri/" {
+      print "        try_files $uri $uri/ " fallback ";"; routes++; next
+    }
+    { print }
+    END { if (!names || !routes) exit 2 }
+  ' "$config" > "$staged"
+else
 cat > "$staged" <<NGINX
 server {
     listen 80;
@@ -64,6 +90,7 @@ server {
     add_header X-Content-Type-Options nosniff always;
 }
 NGINX
+fi
 
 chmod 644 "$staged"
 mv -f "$staged" "$config"

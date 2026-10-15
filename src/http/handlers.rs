@@ -135,6 +135,68 @@ pub async fn add_app(
     Ok(jsonapi::one(jsonapi::resource("apps", app.id, app)))
 }
 
+fn app_error(error: anyhow::Error) -> ApiError {
+    match error.downcast_ref::<crate::storage::AppError>() {
+        Some(crate::storage::AppError::NotFound) => {
+            ApiError(StatusCode::NOT_FOUND, error.to_string())
+        }
+        Some(_) => ApiError(StatusCode::CONFLICT, error.to_string()),
+        None => ApiError::internal(error),
+    }
+}
+
+pub async fn app(
+    ExtractState(state): ExtractState<State>,
+    Path(id): Path<u64>,
+) -> Result<ApiDocument, ApiError> {
+    let app = state.store.find_app(id).await.map_err(app_error)?;
+    Ok(jsonapi::one(jsonapi::resource("apps", app.id, app)))
+}
+
+pub async fn update_app(
+    ExtractState(state): ExtractState<State>,
+    Path(id): Path<u64>,
+    ApiInput(input): ApiInput<crate::domain::NewApp>,
+) -> Result<ApiDocument, ApiError> {
+    input
+        .validate()
+        .map_err(|e| ApiError(StatusCode::BAD_REQUEST, e.to_string()))?;
+    let app =
+        crate::application::apps::update(&state.store, state.current_provider.as_ref(), id, input)
+            .await
+            .map_err(app_error)?;
+    Ok(jsonapi::one(jsonapi::resource("apps", app.id, app)))
+}
+
+pub async fn delete_app(
+    ExtractState(state): ExtractState<State>,
+    Path(id): Path<u64>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .store
+        .request_app_deletion(id)
+        .await
+        .map_err(app_error)?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+pub async fn app_deployments(
+    ExtractState(state): ExtractState<State>,
+    Path(id): Path<u64>,
+) -> Result<ApiDocument, ApiError> {
+    state.store.find_app(id).await.map_err(app_error)?;
+    let rows = state
+        .store
+        .app_deployments(id)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(jsonapi::many(
+        rows.iter()
+            .map(|d| jsonapi::resource("deployments", d.id, d))
+            .collect(),
+    ))
+}
+
 pub async fn workflow(
     ExtractState(state): ExtractState<State>,
     Path(id): Path<u64>,
@@ -142,7 +204,7 @@ pub async fn workflow(
     let app =
         crate::application::apps::create_pr(&state.store, state.current_provider.as_ref(), id)
             .await
-            .map_err(ApiError::internal)?;
+            .map_err(app_error)?;
 
     Ok(jsonapi::one(jsonapi::resource("apps", app.id, app)))
 }

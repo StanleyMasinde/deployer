@@ -968,3 +968,113 @@
     display: none;
   }
 }
+
+.application-action {
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+.application-action .details-button {
+  padding-inline: var(--space-sm);
+}
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-control);
+}
+.detail-section {
+  border-top: 1px solid var(--color-rule);
+  padding-block: var(--space-section);
+}
+.detail-section h2 {
+  margin: 0 0 var(--space-control);
+  font-size: 19px;
+}
+.detail-values {
+  margin: 0 0 var(--space-control);
+}
+.detail-values > div {
+  display: grid;
+  gap: var(--space-2xs);
+  padding-block: var(--space-xs);
+}
+.detail-values dt {
+  font-size: var(--text-small);
+  color: var(--color-muted);
+}
+.detail-values dd {
+  margin: 0;
+  font-size: var(--text-control);
+  overflow-wrap: anywhere;
+}
+.detail-values code {
+  white-space: pre-wrap;
+}
+.detail-deployments {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.detail-deployments li {
+  padding-block: var(--space-control);
+  border-bottom: 1px solid var(--color-rule);
+}
+.detail-deployments li > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-small);
+}
+.detail-deployments time {
+  color: var(--color-muted);
+}
+.detail-deployments .application-error {
+  margin-top: var(--space-xs);
+}
+.danger-section h2,
+.danger-button {
+  color: var(--color-error);
+}
+.danger-section p {
+  font-size: var(--text-control);
+  color: var(--color-muted);
+}
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  z-index: 60;
+}
+.console-confirm {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(480px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  background: var(--color-surface);
+  color: var(--color-body);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-control);
+  padding: var(--space-section);
+  z-index: 61;
+}
+.console-confirm h2 {
+  font-size: 22px;
+  margin-top: 0;
+}
+.console-confirm p {
+  font-size: var(--text-control);
+  color: var(--color-muted);
+}
+.console-confirm input {
+  margin-block: var(--space-xs) var(--space-control);
+}
+@media (min-width: 40rem) {
+  .detail-values > div {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+    gap: var(--space-control);
+  }
+}

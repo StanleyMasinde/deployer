@@ -28,6 +28,7 @@ fn app() -> App {
         output_directory: "dist".into(),
         spa: false,
         workflow_pr: None,
+        deletion_requested: false,
     }
 }
 
