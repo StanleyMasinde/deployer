@@ -60,3 +60,7 @@ console. Enable SPA routing if your app needs an `index.html` fallback.
 Merge the generated workflow PR. Pushes to your selected branch build the app
 on GitHub Actions. A completed-build webhook queues the worker to verify and
 download the artifact, then publish the files through Nginx.
+
+## Contributing
+
+See [Contributing](Contributing.md) to run Deployer locally and check your changes.
