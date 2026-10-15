@@ -10,7 +10,9 @@ fail() {
 }
 
 [ "$(id -u)" = 0 ] || fail 'Run this installer with root privileges: curl -fsSL SCRIPT_URL | sudo sh'
-[ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ] || fail 'This release supports Linux x86_64 only.'
+if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
+  fail 'This release supports Linux x86_64 only.'
+fi
 
 for tool in curl tar sha256sum systemctl nginx sudo flock openssl install getent useradd groupadd runuser visudo grep sed; do
   command -v "$tool" >/dev/null 2>&1 || fail "Missing prerequiapp: $tool. Install it and run this installer again."
@@ -40,7 +42,9 @@ tar -xzf "$work/$archive" -C "$work/release" --no-same-owner
 release="$work/release"
 
 [ "$("$release/bin/deployer" --version)" = "$version" ] || fail 'Binary version does not match the release tag.'
-[ -s "$release/assets/$version/index.html" ] && [ -s "$release/assets/$version/spa.html" ] || fail 'Release frontend is incomplete.'
+if [ ! -s "$release/assets/$version/index.html" ] || [ ! -s "$release/assets/$version/spa.html" ]; then
+  fail 'Release frontend is incomplete.'
+fi
 
 if ! getent group deployer >/dev/null; then
   groupadd --system deployer
