@@ -2,6 +2,7 @@ pub mod application;
 pub mod config;
 pub mod domain;
 pub mod http;
+pub mod https;
 pub mod mail;
 pub mod providers;
 pub mod publishing;

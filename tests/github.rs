@@ -67,6 +67,7 @@ fn vite_workflow_builds_and_uploads_static_output_on_github() {
         spa: false,
         workflow_pr: None,
         deletion_requested: false,
+        https: Default::default(),
     };
     let yaml = workflow::render(&app);
 
@@ -101,6 +102,7 @@ fn workflow_app() -> App {
         spa: false,
         workflow_pr: None,
         deletion_requested: false,
+        https: Default::default(),
     }
 }
 

@@ -29,6 +29,10 @@ impl Store {
             spa: input.spa,
             workflow_pr: None::<String>,
             deleted_at: None::<i64>,
+            https_enabled: None::<bool>,
+            https_domain: None::<String>,
+            https_expires_at: None::<i64>,
+            https_error: None::<String>,
         })
         .exec(&mut self.db.clone())
         .await?;
@@ -101,6 +105,7 @@ impl Store {
                 && !domain_owner.is_some_and(|a| a.id != id),
             AppError::Conflict
         );
+        let domain_changed = current.domain != input.domain;
         let build_changed = current.repository != input.repository
             || current.branch != input.branch
             || current.install_command != input.install_command
@@ -130,6 +135,15 @@ impl Store {
             })
             .exec(&mut tx)
             .await?;
+        if domain_changed && current.https_enabled.unwrap_or(false) {
+            App::filter_by_id(id)
+                .update()
+                .https_domain(None::<String>)
+                .https_expires_at(None::<i64>)
+                .https_error(None::<String>)
+                .exec(&mut tx)
+                .await?;
+        }
         queue_app_task(&mut tx, "app_config", id).await?;
         tx.commit().await?;
         self.find_app(id).await
@@ -212,4 +226,79 @@ async fn queue_app_task(
     toasty::sql::statement("INSERT INTO jobs (kind, payload, status, attempts, available_at, created_at) VALUES (?, ?, 'queued', 0, ?, ?)")
         .bind(kind).bind(id.to_string()).bind(crate::now()).bind(crate::now()).exec(tx).await?;
     Ok(())
+}
+
+impl Store {
+    pub async fn request_https(&self, id: u64) -> anyhow::Result<AppInfo> {
+        let mut db = self.db.clone();
+        let mut tx = db.transaction().await?;
+        toasty::sql::statement("UPDATE apps SET id = id WHERE id = ?")
+            .bind(id)
+            .exec(&mut tx)
+            .await?;
+        let app = App::filter_by_id(id)
+            .first()
+            .exec(&mut tx)
+            .await?
+            .ok_or(AppError::NotFound)?;
+        anyhow::ensure!(app.deleted_at.is_none(), AppError::Deleting);
+        App::filter_by_id(id)
+            .update()
+            .https_enabled(Some(true))
+            .https_error(None::<String>)
+            .exec(&mut tx)
+            .await?;
+        let pending = super::models::Job::filter(super::models::Job::fields().kind().eq("https"))
+            .exec(&mut tx)
+            .await?
+            .iter()
+            .any(|j| {
+                j.payload.as_deref() == Some(id.to_string().as_str())
+                    && matches!(j.status.as_str(), "queued" | "processing")
+            });
+        if !pending {
+            queue_app_task(&mut tx, "https", id).await?;
+        }
+        tx.commit().await?;
+        self.find_app(id).await
+    }
+
+    pub async fn record_https(
+        &self,
+        id: u64,
+        domain: &str,
+        expires: i64,
+        error: Option<&str>,
+    ) -> anyhow::Result<()> {
+        // A domain edit or deletion while ACME runs must not activate a stale certificate.
+        App::filter(
+            App::fields()
+                .id()
+                .eq(id)
+                .and(App::fields().domain().eq(domain))
+                .and(App::fields().deleted_at().is_none()),
+        )
+        .update()
+        .https_domain(Some(domain.to_owned()))
+        .https_expires_at(Some(expires))
+        .https_error(error.map(str::to_owned))
+        .exec(&mut self.db.clone())
+        .await?;
+        Ok(())
+    }
+
+    pub async fn https_failed(&self, id: u64, domain: &str, error: &str) -> anyhow::Result<()> {
+        App::filter(
+            App::fields()
+                .id()
+                .eq(id)
+                .and(App::fields().domain().eq(domain))
+                .and(App::fields().deleted_at().is_none()),
+        )
+        .update()
+        .https_error(Some(error.to_owned()))
+        .exec(&mut self.db.clone())
+        .await?;
+        Ok(())
+    }
 }

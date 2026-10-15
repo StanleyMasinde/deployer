@@ -24,6 +24,7 @@ webhook_secret = "REPLACE_WITH_INDEPENDENT_RANDOM_SECRET"
 [worker]
 apps_root = "/var/lib/deployer/apps"
 nginx_helper = "/usr/local/libexec/deployer-nginx"
+https_helper = "/usr/local/libexec/deployer-acme"
 max_artifact_bytes = 52428800
 max_extracted_bytes = 209715200
 poll_seconds = 2

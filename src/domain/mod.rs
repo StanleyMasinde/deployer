@@ -1,3 +1,5 @@
+mod https;
+pub use https::Https;
 mod build;
 pub use build::{BuildConfig, DeploymentType, Ecosystem, Framework, PackageManager};
 
@@ -19,6 +21,7 @@ pub struct App {
     pub spa: bool,
     pub workflow_pr: Option<String>,
     pub deletion_requested: bool,
+    pub https: Https,
 }
 
 #[derive(Clone, Deserialize)]
@@ -149,13 +152,17 @@ pub enum JobTask {
     Email(crate::mail::Email),
     SyncApp(u64),
     RemoveApp(u64),
+    EnableHttps(u64),
 }
 
 impl Job {
     pub fn deployment_id(&self) -> Option<u64> {
         match &self.task {
             JobTask::Deployment(id) => Some(*id),
-            JobTask::Email(_) | JobTask::SyncApp(_) | JobTask::RemoveApp(_) => None,
+            JobTask::Email(_)
+            | JobTask::SyncApp(_)
+            | JobTask::RemoveApp(_)
+            | JobTask::EnableHttps(_) => None,
         }
     }
 }

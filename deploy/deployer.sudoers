@@ -1,2 +1,3 @@
 # Managed by Deployer. Remove this file to revoke its Nginx activation permission.
 deployer ALL=(root) NOPASSWD: /usr/local/libexec/deployer-nginx
+deployer ALL=(root) NOPASSWD: /usr/local/libexec/deployer-acme issue *, /usr/local/libexec/deployer-acme status *, /usr/local/libexec/deployer-acme cleanup *

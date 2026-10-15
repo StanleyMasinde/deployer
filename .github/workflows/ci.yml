@@ -50,4 +50,4 @@ jobs:
       - run: pnpm --dir frontend test
       - run: pnpm --dir frontend build
       - name: Check shell scripts
-        run: shellcheck install.sh deploy/nginx-helper.sh scripts/package-release.sh
+        run: shellcheck install.sh deploy/nginx-helper.sh deploy/acme-helper.sh scripts/package-release.sh

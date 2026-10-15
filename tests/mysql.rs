@@ -717,6 +717,54 @@ async fn check_app_crud(
     let json: serde_json::Value =
         serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
     assert_eq!(json["data"].as_array().unwrap().len(), 1);
+    assert!(!store.find_app(record.id).await.unwrap().https.enabled);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(req("POST", &format!("{uri}/https"), None, false))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(req("POST", &format!("{uri}/https"), None, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::OK
+        );
+    }
+    let https_job = store.next().await.unwrap().unwrap();
+    assert!(matches!(https_job.task, JobTask::EnableHttps(id) if id == record.id));
+    deployer::storage::models::Job::filter_by_id(https_job.id)
+        .update()
+        .attempts(3_u32)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    store.recover().await.unwrap();
+    let interrupted = store.find_app(record.id).await.unwrap();
+    assert_eq!(
+        interrupted
+            .https
+            .status(&interrupted.domain, deployer::now()),
+        "failed"
+    );
+    store.request_https(record.id).await.unwrap();
+    let https_job = store.next().await.unwrap().unwrap();
+    assert!(matches!(https_job.task, JobTask::EnableHttps(id) if id == record.id));
+    store
+        .record_https(record.id, &input.domain, deployer::now() + 86400, None)
+        .await
+        .unwrap();
+    store.finish(https_job.id, "completed", None).await.unwrap();
+    let saved = store.find_app(record.id).await.unwrap();
+    assert_eq!(saved.https.status(&saved.domain, deployer::now()), "active");
+    assert!(store.next().await.unwrap().is_none());
     input.domain = format!("updated-{nonce}.example.com");
     input.spa = true;
     let body = |input: &NewApp| serde_json::json!({"data":{"type":"apps","attributes":{"repository":input.repository,"branch":input.branch,"domain":input.domain,"buildConfig":input.build_config,"installCommand":input.install_command,"buildCommand":input.build_command,"outputDirectory":input.output_directory,"spa":input.spa}}});
@@ -740,6 +788,32 @@ async fn check_app_crud(
     );
     let saved = store.find_app(record.id).await.unwrap();
     assert_eq!(saved.domain, input.domain);
+    assert_eq!(
+        saved.https.status(&saved.domain, deployer::now()),
+        "pending"
+    );
+    store
+        .record_https(record.id, &record.domain, deployer::now() + 86400, None)
+        .await
+        .unwrap();
+    assert!(
+        store
+            .find_app(record.id)
+            .await
+            .unwrap()
+            .https
+            .expires_at
+            .is_none()
+    );
+    store
+        .https_failed(record.id, &input.domain, "test issuance failed")
+        .await
+        .unwrap();
+    let failed = store.find_app(record.id).await.unwrap();
+    assert_eq!(
+        failed.https.status(&failed.domain, deployer::now()),
+        "failed"
+    );
     assert!(saved.spa);
     assert!(saved.workflow_pr.is_some());
     input.build_command = "npm run build -- --base=/".into();

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from "vue";
 import { buildPreset, type Ecosystem, type PackageManager } from "../build";
+import { appUrl } from "../https";
 import AppDetails from "../components/AppDetails.vue";
 import UiCheckbox from "../components/ui/UiCheckbox.vue";
 import UiSelect from "../components/ui/UiSelect.vue";
@@ -567,7 +568,7 @@ onUnmounted(() => {
                     }}</span>
                     <div>
                       <h2>
-                        <a :href="`http://${app.domain}`" target="_blank" rel="noopener noreferrer"
+                        <a :href="appUrl(app)" target="_blank" rel="noopener noreferrer"
                           >{{ app.domain }}<UiIcon name="arrow"
                         /></a>
                       </h2>
@@ -842,8 +843,8 @@ onUnmounted(() => {
                 autocapitalize="none"
               />
               <p class="field-hint">
-                Point DNS at your VPS. Configure TLS with your certificate tooling. If you change
-                the domain, update its certificate too.
+                Point DNS at your VPS. Enable HTTPS in application details. Domain changes require a
+                certificate for the new hostname.
               </p>
               <Label for="spa" class="checkbox"
                 ><UiCheckbox id="spa" v-model="form.spa" :disabled="busy" />Enable SPA

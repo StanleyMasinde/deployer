@@ -122,9 +122,15 @@ pub struct Github {
 pub struct Worker {
     pub apps_root: PathBuf,
     pub nginx_helper: PathBuf,
+    #[serde(default = "default_https_helper")]
+    pub https_helper: PathBuf,
     pub max_artifact_bytes: u64,
     pub max_extracted_bytes: u64,
     pub poll_seconds: u64,
+}
+
+fn default_https_helper() -> PathBuf {
+    "/usr/local/libexec/deployer-acme".into()
 }
 
 #[derive(Clone, Deserialize)]

@@ -1,3 +1,4 @@
+import type { Https } from "../https";
 import type { BuildConfig } from "../build";
 
 export class ApiError extends Error {
@@ -54,6 +55,7 @@ export function body(type: string, attributes: object): string {
 }
 
 export type App = {
+  https: Https;
   buildConfig: BuildConfig;
   installCommand: string;
   buildCommand: string;

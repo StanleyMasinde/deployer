@@ -73,6 +73,9 @@ impl Store {
         let mut db = self.db.clone();
         let mut transaction = db.transaction().await?;
 
+        toasty::sql::statement("UPDATE apps a JOIN jobs j ON j.payload = CAST(a.id AS CHAR) SET a.https_error = 'Certificate operation interrupted on final attempt. Retry HTTPS.' WHERE a.https_enabled = 1 AND j.kind IN ('https', 'app_config') AND j.status = 'processing' AND j.attempts >= 3")
+            .exec(&mut transaction).await?;
+
         toasty::sql::statement(
             "UPDATE deployments d JOIN jobs j ON j.deployment_id = d.id
              SET d.status = 'failed', d.error = 'Worker interrupted on final attempt', d.finished_at = ?

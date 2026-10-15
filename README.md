@@ -61,6 +61,58 @@ Merge the generated workflow PR. Pushes to your selected branch build the app
 on GitHub Actions. A completed-build webhook queues the worker to verify and
 download the artifact, then publish the files through Nginx.
 
+## Enable HTTPS for an app
+
+The installer installs a pinned, checksum-verified acme.sh client and enables
+`deployer-acme.timer` for daily renewal checks. Deployer uses Let's Encrypt
+with HTTP validation and keeps ownership of the app's Nginx configuration.
+
+1. Point the app domain's DNS records at your VPS. If you publish an AAAA
+   record, make sure it reaches this VPS over IPv6 too.
+2. Allow inbound TCP ports 80 and 443. Keep port 80 accessible for renewals.
+3. Open the app's **Details**, then select **Enable HTTPS**.
+4. Wait for **HTTPS active**. The details view updates automatically and shows
+   the certificate expiry date. You can enable HTTPS before the first deployment.
+
+Deployer redirects HTTP requests to HTTPS after issuance, while keeping
+`/.well-known/acme-challenge/` reachable for validation. Certificates and keys
+live under `/etc/deployer/tls/APP_ID/`; ACME account and renewal state live
+under `/var/lib/deployer/acme/`. Replace `APP_ID` with the application's ID.
+Only the root-owned helper handles private keys.
+
+If issuance fails, check DNS and port 80, then select **Retry certificate**.
+Inspect worker and renewal logs on the VPS:
+
+```sh
+sudo journalctl -u deployer-worker.service -n 100
+sudo journalctl -u deployer-acme.service -n 100
+sudo systemctl status deployer-acme.timer
+```
+
+To run a renewal check immediately, start the renewal service:
+
+```sh
+sudo systemctl start deployer-acme.service
+```
+
+The client renews certificates when due. After renewal, its saved hook validates
+and reloads Nginx. The worker refreshes expiry and renewal-error information
+about once a minute while idle; a busy worker can delay the update.
+
+Changing an HTTPS-enabled app's domain queues a certificate request for the new
+hostname. HTTP remains available if issuance fails. Deleting an app removes
+its Nginx config, certificates, and per-app renewal state through the worker.
+
+Existing TLS configurations added outside Deployer aren't adopted automatically.
+Keep managing those certificates separately, or migrate the app to an HTTP
+configuration before enabling managed HTTPS. The control panel's own HTTPS
+configuration remains separate from app certificate management.
+
+For upgrades, rerun the installer so the worker, helpers, acme.sh client, and
+renewal units are installed together. Local macOS development can exercise the
+console, but live certificate issuance requires the Linux VPS setup and public
+DNS. The helper tests simulate the ACME client without requesting public certificates.
+
 ## Contributing
 
 See [Contributing](Contributing.md) to run Deployer locally and check your changes.

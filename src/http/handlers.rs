@@ -370,3 +370,11 @@ pub async fn setup_root(
         )),
     ))
 }
+
+pub async fn enable_https(
+    ExtractState(state): ExtractState<State>,
+    Path(id): Path<u64>,
+) -> Result<ApiDocument, ApiError> {
+    let app = state.store.request_https(id).await.map_err(app_error)?;
+    Ok(jsonapi::one(jsonapi::resource("apps", app.id, app)))
+}

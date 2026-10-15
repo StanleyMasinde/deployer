@@ -33,6 +33,12 @@ pub struct App {
     #[column(type = text)]
     pub workflow_pr: Option<String>,
     pub deleted_at: Option<i64>,
+    pub https_enabled: Option<bool>,
+    #[column(type = varchar(253))]
+    pub https_domain: Option<String>,
+    pub https_expires_at: Option<i64>,
+    #[column(type = text)]
+    pub https_error: Option<String>,
 }
 
 #[derive(toasty::Model)]

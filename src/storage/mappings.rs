@@ -24,6 +24,12 @@ impl TryFrom<models::App> for domain::App {
             spa: app.spa,
             workflow_pr: app.workflow_pr,
             deletion_requested: app.deleted_at.is_some(),
+            https: domain::Https {
+                enabled: app.https_enabled.unwrap_or(false),
+                domain: app.https_domain,
+                expires_at: app.https_expires_at,
+                error: app.https_error,
+            },
         })
     }
 }
@@ -54,6 +60,7 @@ pub(super) fn job_task(job: &models::Job) -> anyhow::Result<domain::JobTask> {
             Ok(domain::JobTask::Email(email))
         }
         ("app_config", None, Some(payload)) => Ok(domain::JobTask::SyncApp(payload.parse()?)),
+        ("https", None, Some(payload)) => Ok(domain::JobTask::EnableHttps(payload.parse()?)),
         ("app_remove", None, Some(payload)) => Ok(domain::JobTask::RemoveApp(payload.parse()?)),
         _ => anyhow::bail!("invalid job payload"),
     }
