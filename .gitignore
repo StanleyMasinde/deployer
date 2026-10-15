@@ -1,0 +1,11 @@
+/target
+/config.toml
+/.env
+/frontend/node_modules
+/frontend/dist
+/frontend/.vite-ssg-temp
+/frontend/*.tsbuildinfo
+/frontend/typed-router.d.ts
+/.hallmark
+/dist
+/.pnpm-store

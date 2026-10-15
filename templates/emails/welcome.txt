@@ -1,0 +1,7 @@
+Welcome to Deployer, {{ name }}.
+
+Your root account is ready. Sign in to connect a repository and deploy your first static site:
+
+{{ link }}/console
+
+You manage this Deployer instance on your own VPS.

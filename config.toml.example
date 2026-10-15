@@ -1,0 +1,42 @@
+[server]
+listen = "127.0.0.1:8080"
+public_url = "https://deployer.example.com"
+assets_root = "/var/lib/deployer/assets"
+state_root = "/var/lib/deployer/state"
+# Generate each secret independently with: openssl rand -hex 32
+session_secret = "REPLACE_WITH_RANDOM_SECRET"
+
+[database]
+url = "mysql://deployer:PASSWORD@127.0.0.1:3306/deployer"
+# Optional, used only by: cargo run --bin migrate -- --test migration apply
+# test_url = "mysql://deployer:PASSWORD@127.0.0.1:3306/deployer_test"
+
+[providers]
+current = "github"
+
+[providers.github]
+app_id = "APP_ID"
+installation_id = 0
+private_key = "/etc/deployer/github-app.pem"
+webhook_secret = "REPLACE_WITH_INDEPENDENT_RANDOM_SECRET"
+
+[worker]
+apps_root = "/var/lib/deployer/apps"
+nginx_helper = "/usr/local/libexec/deployer-nginx"
+max_artifact_bytes = 52428800
+max_extracted_bytes = 209715200
+poll_seconds = 2
+
+# Optional outbound email. Omit these sections to disable sending.
+# [mail]
+# from_email = "deployer@example.com"
+# from_name = "Deployer"
+#
+# [mail.smtp]
+# host = "smtp.example.com"
+# port = 587
+# security = "starttls" # "tls" for implicit TLS, usually port 465
+# username = "SMTP_USERNAME"
+# password = "SMTP_PASSWORD"
+# Local Mailpit: host = "127.0.0.1", port = 1025, security = "none".
+# Omit username and password together for unauthenticated local SMTP.

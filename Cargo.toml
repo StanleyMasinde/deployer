@@ -1,0 +1,41 @@
+[package]
+name = "deployer"
+version = "0.1.0"
+edition = "2024"
+default-run = "deployer"
+
+[dependencies]
+anyhow = "1"
+argon2 = "0.6"
+axum = "0.8"
+base64 = "0.23"
+fs2 = "0.4"
+hex = "0.4"
+hmac = "0.13"
+jsonwebtoken = { version = "11", features = ["aws_lc_rs"] }
+rand = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "query"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "time", "sync", "process", "io-util", "fs"] }
+toml = "1"
+toasty = { version = "0.11", features = ["mysql"] }
+toasty-cli = "0.11"
+tower-http = { version = "0.7", features = ["fs", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+jsonapi = "0.7.0"
+email_address = "0.2"
+askama = "0.16"
+lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls", "aws-lc-rs", "webpki-roots"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1

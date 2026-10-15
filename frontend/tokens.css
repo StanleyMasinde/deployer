@@ -1,0 +1,21 @@
+:root {
+  --color-paper: oklch(98.5% 0.004 250);
+  --color-surface: oklch(100% 0 0);
+  --color-ink: oklch(24% 0.02 258);
+  --color-body: oklch(34% 0.018 257);
+  --color-muted: oklch(47% 0.02 257);
+  --color-rule: oklch(87% 0.014 250);
+  --color-accent: oklch(48% 0.2 256);
+  --color-accent-hover: oklch(40% 0.2 256);
+  --color-accent-ink: oklch(100% 0 0);
+  --color-tint: oklch(95% 0.025 256);
+  --color-error: oklch(42% 0.15 25);
+  --color-error-paper: oklch(97% 0.015 25);
+  --font-body: "Inter", sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --radius-control: 6px;
+  --space-sm: 0.75rem;
+  --space-md: 1.5rem;
+  --space-lg: 3rem;
+}

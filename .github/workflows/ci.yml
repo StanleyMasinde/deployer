@@ -1,0 +1,53 @@
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust checks and MySQL integration
+    runs-on: ubuntu-24.04
+
+    env:
+      DEPLOYER_TEST_DATABASE_URL: mysql://root:root@127.0.0.1:3306/deployer_test
+
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start bundled MySQL and create test database
+        env:
+          MYSQL_PWD: root
+        run: |
+          sudo systemctl start mysql.service
+
+          mysql --host=127.0.0.1 --user=root \
+            --execute='CREATE DATABASE deployer_test;'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  frontend:
+    name: Frontend and distribution checks
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/setup@v3
+        with:
+          working-directory: frontend
+          runtime: node@26
+          require-lockfile: true
+      - run: pnpm --dir frontend fmt:check
+      - run: pnpm --dir frontend test
+      - run: pnpm --dir frontend build
+      - name: Check shell scripts
+        run: shellcheck install.sh deploy/nginx-helper.sh scripts/package-release.sh

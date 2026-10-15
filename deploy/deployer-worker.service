@@ -1,0 +1,24 @@
+[Unit]
+Description=Deployer static app worker
+After=network-online.target deployer.service nginx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deployer
+Group=deployer
+Environment=DEPLOYER_CONFIG=/etc/deployer/config.toml
+ExecStart=/usr/local/bin/deployer-worker
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=300
+UMask=0022
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+# The root-owned Nginx helper is the only permitted sudo command.
+# NoNewPrivileges would prevent that helper from running.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,29 @@
+[Unit]
+Description=Deployer web server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deployer
+Group=deployer
+Environment=DEPLOYER_CONFIG=/etc/deployer/config.toml
+ExecStartPre=/usr/local/bin/deployer check-config
+ExecStart=/usr/local/bin/deployer
+ExecStartPost=/usr/local/bin/deployer ready
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=180
+TimeoutStopSec=60
+UMask=0022
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/deployer/state
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
