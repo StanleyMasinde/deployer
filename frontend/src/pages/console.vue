@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from "vue";
+import { buildPreset, type Ecosystem, type PackageManager } from "../build";
 import UiCheckbox from "../components/ui/UiCheckbox.vue";
 import UiSelect from "../components/ui/UiSelect.vue";
 import {
@@ -50,9 +51,7 @@ const form = reactive({
   repository: "",
   branch: "main",
   domain: "",
-  installCommand: "npm ci",
-  buildCommand: "npm run build",
-  outputDirectory: "dist",
+  ...buildPreset("none"),
   spa: false,
 });
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -134,6 +133,17 @@ function restoreFormFocus(event: Event) {
     event.preventDefault();
     formTrigger.focus({ preventScroll: true });
   }
+}
+
+function changeEcosystem(ecosystem: string) {
+  Object.assign(form, buildPreset(ecosystem as Ecosystem));
+}
+
+function changePackageManager(packageManager: string) {
+  const preset = buildPreset("javascript", packageManager as PackageManager);
+  form.buildConfig = preset.buildConfig;
+  form.installCommand = preset.installCommand;
+  form.buildCommand = preset.buildCommand;
 }
 
 function chooseRepository() {
@@ -666,8 +676,65 @@ onUnmounted(() => {
               <p class="field-hint">Pushes to this branch trigger a deployment.</p>
             </fieldset>
             <fieldset :disabled="busy">
-              <legend>Build settings</legend>
-              <div class="drawer-field-grid">
+              <legend>Build setup</legend>
+              <Label for="deployment-type">Deployment type</Label>
+              <UiSelect
+                id="deployment-type"
+                v-model="form.buildConfig.deploymentType"
+                :options="[{ value: 'static', label: 'Static site' }]"
+                :disabled="busy"
+              />
+              <p class="field-hint">Serve HTML, CSS, and JavaScript from your VPS.</p>
+              <Label for="ecosystem">Build ecosystem</Label>
+              <UiSelect
+                id="ecosystem"
+                :model-value="form.buildConfig.ecosystem"
+                :options="[
+                  { value: 'none', label: 'None — plain static files' },
+                  { value: 'javascript', label: 'JavaScript' },
+                ]"
+                :disabled="busy"
+                @update:model-value="changeEcosystem"
+              />
+              <p class="field-hint">Choose how your site is built.</p>
+              <template v-if="form.buildConfig.ecosystem === 'javascript'">
+                <Label for="package-manager">Package manager</Label>
+                <UiSelect
+                  id="package-manager"
+                  :model-value="form.buildConfig.packageManager ?? 'npm'"
+                  :options="[
+                    { value: 'npm', label: 'npm (Node.js 24)' },
+                    { value: 'pnpm', label: 'pnpm 12' },
+                    { value: 'yarn', label: 'Yarn 4' },
+                    { value: 'bun', label: 'Bun 1' },
+                  ]"
+                  :disabled="busy"
+                  @update:model-value="changePackageManager"
+                />
+                <p class="field-hint">
+                  Installs the selected tool in your GitHub workflow. Commit its lockfile before
+                  building.
+                </p>
+              </template>
+              <Label for="framework">Framework preset</Label>
+              <UiSelect
+                id="framework"
+                v-model="form.buildConfig.framework"
+                :options="
+                  form.buildConfig.ecosystem === 'none'
+                    ? [{ value: 'plainHtml', label: 'Plain HTML / CSS / JavaScript' }]
+                    : [{ value: 'vite', label: 'Vite' }]
+                "
+                :disabled="busy"
+              />
+              <p class="field-hint">
+                {{
+                  form.buildConfig.ecosystem === "none"
+                    ? "Publish files as they are, with no runtime or build step."
+                    : "Build with Vite, then publish the output directory. Commands remain editable."
+                }}
+              </p>
+              <div v-if="form.buildConfig.ecosystem === 'javascript'" class="drawer-field-grid">
                 <div>
                   <Label for="install">Install command</Label
                   ><UiInput id="install" v-model="form.installCommand" required :disabled="busy" />
@@ -679,7 +746,13 @@ onUnmounted(() => {
               </div>
               <Label for="output">Output directory</Label
               ><UiInput id="output" v-model="form.outputDirectory" required :disabled="busy" />
-              <p class="field-hint">The folder containing your built index.html.</p>
+              <p class="field-hint">
+                {{
+                  form.buildConfig.ecosystem === "none"
+                    ? "The folder containing index.html. Use . for the repository root."
+                    : "The folder containing your built index.html."
+                }}
+              </p>
             </fieldset>
             <fieldset :disabled="busy">
               <legend>Destination</legend>

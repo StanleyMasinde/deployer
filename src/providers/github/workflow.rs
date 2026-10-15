@@ -1,55 +1,41 @@
-use crate::domain::App;
+use crate::domain::{App, Ecosystem, PackageManager};
 
 pub const PATH: &str = ".github/workflows/deployer.yml";
 pub const ARTIFACT: &str = "deployer-app";
 
 pub fn render(app: &App) -> String {
-    // JSON strings are also YAML scalars. Commands remain literal block content.
     let branch = serde_json::to_string(&app.branch).expect("string");
-    let install = app
-        .install_command
-        .lines()
-        .map(|s| format!("          {s}\n"))
-        .collect::<String>();
-    let build = app
-        .build_command
-        .lines()
-        .map(|s| format!("          {s}\n"))
-        .collect::<String>();
+    let output_directory = serde_json::to_string(&app.output_directory).expect("string");
+    if app.build_config.ecosystem == Ecosystem::None {
+        return format!(
+            include_str!("templates/static.yml"),
+            branch = branch,
+            output_directory = output_directory,
+            artifact = ARTIFACT,
+        );
+    }
+    // Setup comes only from the explicit package-manager selection, never repository detection.
+    let setup = match app.build_config.package_manager {
+        Some(PackageManager::Npm) => include_str!("templates/setup/npm.yml"),
+        Some(PackageManager::Pnpm) => include_str!("templates/setup/pnpm.yml"),
+        Some(PackageManager::Yarn) => include_str!("templates/setup/yarn.yml"),
+        Some(PackageManager::Bun) => include_str!("templates/setup/bun.yml"),
+        None => unreachable!("JavaScript build configuration must be validated before rendering"),
+    };
+    let command = |value: &str| {
+        value
+            .lines()
+            .map(|s| format!("          {s}\n"))
+            .collect::<String>()
+    };
     format!(
-        r#"# Managed by Deployer. Review and merge this PR to enable deployments.
-name: Deployer
-on:
-  push:
-    branches: [{branch}]
-  workflow_dispatch:
-permissions:
-  contents: read
-concurrency:
-  group: deployer-${{{{ github.ref }}}}
-  cancel-in-progress: true
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-      - name: Install dependencies
-        run: |
-{install}      - name: Build static app
-        run: |
-{build}      - name: Upload static app
-        uses: actions/upload-artifact@v7
-        with:
-          name: {ARTIFACT}
-          path: {output}/
-          include-hidden-files: false
-          if-no-files-found: error
-          retention-days: 3
-"#,
-        output = app.output_directory
+        include_str!("templates/vite.yml"),
+        branch = branch,
+        setup = setup,
+        install = command(&app.install_command),
+        build = command(&app.build_command),
+        artifact = ARTIFACT,
+        output_directory = output_directory,
+        output_path = serde_json::to_string(&format!("{}/", app.output_directory)).expect("string"),
     )
 }

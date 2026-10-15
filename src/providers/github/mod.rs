@@ -14,6 +14,30 @@ use sha2::{Digest, Sha256};
 use std::{path::Path, sync::Arc, time::Duration};
 use tokio::{io::AsyncWriteExt, sync::Mutex};
 
+#[derive(Deserialize)]
+struct InstallationRepository {
+    full_name: String,
+    default_branch: String,
+    pushed_at: Option<String>,
+}
+
+fn recent_repositories(mut repos: Vec<InstallationRepository>) -> Vec<Repository> {
+    // GitHub returns UTC timestamps in ISO 8601 format, so lexical order is chronological.
+    repos.sort_by(|a, b| {
+        b.pushed_at
+            .cmp(&a.pushed_at)
+            .then_with(|| a.full_name.cmp(&b.full_name))
+    });
+
+    repos
+        .into_iter()
+        .map(|repo| Repository {
+            full_name: repo.full_name,
+            default_branch: repo.default_branch,
+        })
+        .collect()
+}
+
 pub struct Github {
     config: Config,
     key: jsonwebtoken::EncodingKey,
@@ -145,21 +169,16 @@ impl SourceProvider for Github {
             let rows = value["repositories"]
                 .as_array()
                 .context("GitHub repositories missing")?;
-            for repo in rows {
-                repos.push(Repository {
-                    full_name: repo["full_name"]
-                        .as_str()
-                        .context("repository name")?
-                        .into(),
-                    default_branch: repo["default_branch"]
-                        .as_str()
-                        .context("default branch")?
-                        .into(),
-                });
-            }
+            let count = rows.len();
+            repos.extend(
+                serde_json::from_value::<Vec<InstallationRepository>>(
+                    value["repositories"].clone(),
+                )
+                .context("parse GitHub repositories")?,
+            );
 
-            if rows.len() < 100 {
-                return Ok(repos);
+            if count < 100 {
+                return Ok(recent_repositories(repos));
             }
         }
 
@@ -342,5 +361,48 @@ impl SourceProvider for Github {
             "artifact checksum mismatch"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{InstallationRepository, recent_repositories};
+    use serde_json::json;
+
+    #[test]
+    fn repositories_sort_by_last_push_across_pages_with_missing_dates_last() {
+        let pages = [
+            json!([
+                {"full_name":"owner/old","default_branch":"main","pushed_at":"2025-01-01T00:00:00Z"},
+                {"full_name":"owner/empty-z","default_branch":"main","pushed_at":null},
+                {"full_name":"owner/recent-z","default_branch":"develop","pushed_at":"2026-10-16T12:00:00Z"}
+            ]),
+            json!([
+                {"full_name":"owner/recent-a","default_branch":"production","pushed_at":"2026-10-16T12:00:00Z"},
+                {"full_name":"owner/newest","default_branch":"main","pushed_at":"2026-10-16T13:00:00Z"},
+                {"full_name":"owner/empty-a","default_branch":"main"}
+            ]),
+        ];
+        let repos = pages
+            .into_iter()
+            .flat_map(|page| serde_json::from_value::<Vec<InstallationRepository>>(page).unwrap())
+            .collect();
+        let sorted = recent_repositories(repos);
+        assert_eq!(
+            sorted
+                .iter()
+                .map(|repo| repo.full_name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "owner/newest",
+                "owner/recent-a",
+                "owner/recent-z",
+                "owner/old",
+                "owner/empty-a",
+                "owner/empty-z"
+            ]
+        );
+        assert_eq!(sorted[1].default_branch, "production");
+        assert_eq!(sorted[2].default_branch, "develop");
     }
 }

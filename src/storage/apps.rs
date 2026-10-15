@@ -3,30 +3,32 @@ use crate::domain::{App as AppInfo, NewApp};
 
 impl Store {
     pub async fn apps(&self) -> anyhow::Result<Vec<AppInfo>> {
-        Ok(App::all()
+        App::all()
             .exec(&mut self.db.clone())
             .await?
             .into_iter()
-            .map(Into::into)
-            .collect())
+            .map(TryInto::try_into)
+            .collect()
     }
 
     pub async fn app(&self, id: u64) -> anyhow::Result<AppInfo> {
-        App::filter_by_id(id)
+        let app = App::filter_by_id(id)
             .first()
             .exec(&mut self.db.clone())
             .await?
-            .map(Into::into)
-            .ok_or_else(|| anyhow::anyhow!("app not found"))
+            .ok_or_else(|| anyhow::anyhow!("app not found"))?;
+        app.try_into()
     }
 
     pub async fn create_app(&self, provider: &str, input: &NewApp) -> anyhow::Result<AppInfo> {
+        let build_config = serde_json::to_string(&input.build_config)?;
         let app = toasty::create!(App {
             provider,
             repository: &input.repository,
             branch: &input.branch,
             domain: &input.domain,
             install_command: &input.install_command,
+            build_config: Some(build_config),
             build_command: &input.build_command,
             output_directory: &input.output_directory,
             spa: input.spa,
@@ -35,7 +37,7 @@ impl Store {
         .exec(&mut self.db.clone())
         .await?;
 
-        Ok(app.into())
+        app.try_into()
     }
 
     pub async fn set_pr(&self, id: u64, url: &str) -> anyhow::Result<()> {
