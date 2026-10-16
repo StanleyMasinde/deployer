@@ -159,3 +159,29 @@ async fn smtp_delivery_emits_multipart_and_classifies_rejections() {
         }
     }
 }
+
+#[test]
+fn password_recovery_templates_escape_owner_data_and_include_reset_guidance() {
+    let link = "https://deployer.example.com/reset-password#token=token&next=console";
+    let reset = SystemEmail::PasswordReset {
+        name: "<owner>",
+        link,
+    }
+    .render("owner@example.com")
+    .unwrap();
+    assert_eq!(reset.subject, "Reset your Deployer password");
+    assert!(reset.text.contains(link));
+    assert!(reset.text.contains("30 minutes"));
+    assert!(reset.html.contains("&#60;owner&#62;"));
+    assert!(!reset.html.contains("<owner>"));
+    assert!(!reset.html.contains("token=token&next=console"));
+    let changed = SystemEmail::PasswordChanged {
+        name: "<owner>",
+        link: "https://deployer.example.com",
+    }
+    .render("owner@example.com")
+    .unwrap();
+    assert_eq!(changed.subject, "Your Deployer password was changed");
+    assert!(changed.html.contains("&#60;owner&#62;"));
+    assert!(!changed.html.contains("<owner>"));
+}

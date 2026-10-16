@@ -47,6 +47,7 @@ jobs:
           runtime: node@26
           require-lockfile: true
       - run: pnpm --dir frontend fmt:check
+      - run: pnpm --dir frontend lint
       - run: pnpm --dir frontend test
       - run: pnpm --dir frontend build
       - name: Check shell scripts

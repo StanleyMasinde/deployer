@@ -3,7 +3,7 @@ use super::{ApiError, State};
 use crate::providers::SourceProvider;
 use axum::{
     Json,
-    extract::{Path, State as ExtractState},
+    extract::{Path, Query, State as ExtractState},
     http::{HeaderMap, StatusCode, header},
 };
 use serde::Deserialize;
@@ -56,6 +56,10 @@ pub async fn login(
             )
         })?;
     let email_matches = root.email.eq_ignore_ascii_case(input.email.trim());
+    let session_key = crate::application::sessions::credential_key(
+        &state.config.server.session_secret,
+        &root.password_hash,
+    );
     let hash = root.password_hash;
     let valid = crate::application::sessions::verify_password(input.password, hash)
         .await
@@ -70,10 +74,7 @@ pub async fn login(
         ));
     }
 
-    let token = crate::application::sessions::issue(
-        &state.config.server.session_secret,
-        crate::now() + 86400,
-    );
+    let token = crate::application::sessions::issue(&session_key, crate::now() + 86400);
     let mut headers = HeaderMap::new();
     headers.insert(
         header::SET_COOKIE,
@@ -100,12 +101,18 @@ pub async fn logout(ExtractState(state): ExtractState<State>) -> (HeaderMap, Sta
     (headers, StatusCode::NO_CONTENT)
 }
 
-pub async fn session() -> ApiDocument {
-    jsonapi::one(jsonapi::resource(
+pub async fn session(ExtractState(state): ExtractState<State>) -> Result<ApiDocument, ApiError> {
+    let user = state
+        .store
+        .root_account()
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "Sign in to continue".into()))?;
+    Ok(jsonapi::one(jsonapi::resource(
         "sessions",
         "current",
-        json!({"authenticated":true}),
-    ))
+        json!({"authenticated":true, "user":{"id":user.id,"name":user.name,"email":user.email}}),
+    )))
 }
 
 pub async fn apps(ExtractState(state): ExtractState<State>) -> Result<ApiDocument, ApiError> {
@@ -180,14 +187,20 @@ pub async fn delete_app(
     Ok(StatusCode::ACCEPTED)
 }
 
+#[derive(Deserialize)]
+pub struct DeploymentCursor {
+    before: Option<u64>,
+}
+
 pub async fn app_deployments(
     ExtractState(state): ExtractState<State>,
     Path(id): Path<u64>,
+    Query(cursor): Query<DeploymentCursor>,
 ) -> Result<ApiDocument, ApiError> {
     state.store.find_app(id).await.map_err(app_error)?;
     let rows = state
         .store
-        .app_deployments(id)
+        .app_deployments_before(id, cursor.before)
         .await
         .map_err(ApiError::internal)?;
     Ok(jsonapi::many(
@@ -258,10 +271,36 @@ pub async fn webhook(
         .map_err(|_| ApiError(StatusCode::UNAUTHORIZED, "Invalid webhook signature".into()))?;
     match headers.get("x-github-event").and_then(|h| h.to_str().ok()) {
         Some("ping") => return Ok(StatusCode::OK),
+        Some("pull_request") => {
+            if let Some(update) =
+                crate::providers::github::webhook::parse_pull_request(&body, github.installation_id)
+                    .map_err(|_| {
+                        ApiError(StatusCode::BAD_REQUEST, "Invalid pull request event".into())
+                    })?
+            {
+                state
+                    .store
+                    .update_workflow_pr(&update)
+                    .await
+                    .map_err(ApiError::internal)?;
+                state.store.notify_changes();
+            }
+            return Ok(StatusCode::ACCEPTED);
+        }
         Some("workflow_run") => {}
         _ => return Ok(StatusCode::NO_CONTENT),
     }
 
+    if let Some((build, status, error)) =
+        crate::providers::github::webhook::parse_workflow_status(&body, github.installation_id)
+            .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "Invalid workflow event".into()))?
+    {
+        state
+            .store
+            .record_workflow_status(&build, status, error.as_deref())
+            .await
+            .map_err(ApiError::internal)?;
+    }
     if let Some(build) = crate::providers::github::webhook::parse(&body, github.installation_id)
         .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "Invalid workflow event".into()))?
     {
@@ -270,6 +309,7 @@ pub async fn webhook(
             .map_err(ApiError::internal)?;
     }
 
+    state.store.notify_changes();
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -349,10 +389,22 @@ pub async fn setup_root(
         .await
         .map_err(|error| ApiError(StatusCode::BAD_REQUEST, error.to_string()))?;
 
-    let token = crate::application::sessions::issue(
+    let root = state
+        .store
+        .root_account()
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Root account missing".into(),
+            )
+        })?;
+    let session_key = crate::application::sessions::credential_key(
         &state.config.server.session_secret,
-        crate::now() + 86400,
+        &root.password_hash,
     );
+    let token = crate::application::sessions::issue(&session_key, crate::now() + 86400);
     let mut headers = HeaderMap::new();
     headers.insert(
         header::SET_COOKIE,
@@ -377,4 +429,21 @@ pub async fn enable_https(
 ) -> Result<ApiDocument, ApiError> {
     let app = state.store.request_https(id).await.map_err(app_error)?;
     Ok(jsonapi::one(jsonapi::resource("apps", app.id, app)))
+}
+
+pub async fn deployment(
+    ExtractState(state): ExtractState<State>,
+    Path(id): Path<u64>,
+) -> Result<ApiDocument, ApiError> {
+    let deployment = state
+        .store
+        .deployment_optional(id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "Deployment not found".into()))?;
+    Ok(jsonapi::one(jsonapi::resource(
+        "deployments",
+        deployment.id,
+        &deployment,
+    )))
 }

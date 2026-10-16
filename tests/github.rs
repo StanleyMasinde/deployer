@@ -66,6 +66,7 @@ fn vite_workflow_builds_and_uploads_static_output_on_github() {
         output_directory: "dist".into(),
         spa: false,
         workflow_pr: None,
+        workflow_pr_state: None,
         deletion_requested: false,
         https: Default::default(),
     };
@@ -101,6 +102,7 @@ fn workflow_app() -> App {
         output_directory: "public/site".into(),
         spa: false,
         workflow_pr: None,
+        workflow_pr_state: None,
         deletion_requested: false,
         https: Default::default(),
     }
@@ -151,4 +153,40 @@ fn plain_static_workflow_stages_root_files_without_a_runtime_or_build() {
     assert!(!yaml.contains("npm"));
     assert!(!yaml.contains("name: Install dependencies"));
     assert!(!yaml.contains("name: Build Vite app"));
+}
+
+#[test]
+fn pull_request_events_distinguish_merge_close_and_reopen() {
+    let mut event = json!({"action":"closed","installation":{"id":42},"repository":{"full_name":"owner/repo"},"pull_request":{"html_url":"https://github.com/owner/repo/pull/1","state":"closed","merged":true,"updated_at":"2026-10-16T10:00:00Z"}});
+    let parse = |value: &serde_json::Value| {
+        webhook::parse_pull_request(&serde_json::to_vec(value).unwrap(), 42)
+            .unwrap()
+            .unwrap()
+    };
+    assert_eq!(parse(&event).state, "merged");
+    event["pull_request"]["merged"] = json!(false);
+    assert_eq!(parse(&event).state, "closed");
+    event["action"] = json!("reopened");
+    event["pull_request"]["state"] = json!("open");
+    assert_eq!(parse(&event).state, "open");
+    assert!(webhook::parse_pull_request(&serde_json::to_vec(&event).unwrap(), 99).is_err());
+}
+
+#[test]
+fn workflow_progress_and_failure_do_not_publish_artifacts() {
+    let mut event = json!({"action":"in_progress","installation":{"id":42},"repository":{"full_name":"owner/repo"},"workflow_run":{"id":123,"run_attempt":1,"head_branch":"main","head_sha":"a".repeat(40),"event":"push","conclusion":null,"path":workflow::PATH,"head_repository":{"full_name":"owner/repo"}}});
+    let parse = |value: &serde_json::Value| {
+        webhook::parse_workflow_status(&serde_json::to_vec(value).unwrap(), 42).unwrap()
+    };
+    assert_eq!(parse(&event).unwrap().1, "building");
+    event["action"] = json!("completed");
+    event["workflow_run"]["conclusion"] = json!("failure");
+    assert_eq!(parse(&event).unwrap().1, "failed");
+    assert!(
+        webhook::parse(&serde_json::to_vec(&event).unwrap(), 42)
+            .unwrap()
+            .is_none()
+    );
+    event["workflow_run"]["head_repository"]["full_name"] = json!("other/fork");
+    assert!(parse(&event).is_none());
 }

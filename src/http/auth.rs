@@ -29,9 +29,15 @@ pub async fn protect(
                 .find(|(k, _)| *k == "deployer_session")
                 .map(|(_, v)| v)
         });
-    if !token.is_some_and(|t| {
-        crate::application::sessions::valid(&state.config.server.session_secret, t, crate::now())
-    }) {
+    let valid = match token {
+        Some(token) => state
+            .store
+            .valid_session(&state.config.server.session_secret, token, crate::now())
+            .await
+            .map_err(ApiError::internal)?,
+        None => false,
+    };
+    if !valid {
         return Err(ApiError(
             StatusCode::UNAUTHORIZED,
             "Sign in to continue".into(),
@@ -54,7 +60,7 @@ pub async fn protect(
 
 pub fn cookie(state: &State, value: &str, max_age: u32) -> String {
     format!(
-        "deployer_session={value}; Path=/; HttpOnly; SameApp=Strict; Max-Age={max_age}{}",
+        "deployer_session={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{}",
         if state.config.server.public_url.starts_with("https://") {
             "; Secure"
         } else {

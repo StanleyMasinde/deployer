@@ -35,7 +35,7 @@ impl Store {
             "INSERT INTO deployments
                 (event_key, app_id, run_id, attempt, commit_sha, status, created_at)
              VALUES (?, ?, ?, ?, ?, 'queued', ?)
-             ON DUPLICATE KEY UPDATE event_key = event_key",
+             ON DUPLICATE KEY UPDATE event_key = event_key, status = IF(status = 'building', 'queued', status)",
         )
         .bind(&key)
         .bind(app.id)

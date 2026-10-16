@@ -424,6 +424,8 @@ async fn check_http(store: Store, database_url: &str) {
         .unwrap()
         .to_owned();
 
+    check_session_metadata(&app, &cookie).await;
+
     let response = app
         .clone()
         .oneshot(
@@ -478,6 +480,16 @@ async fn check_http(store: Store, database_url: &str) {
         "Zoë Masinde"
     );
     check_mail_queue(&cleanup_store, current_provider.as_ref(), &config.worker).await;
+    check_deployment_resources(&app, &cleanup_store, &cookie).await;
+    check_workflow_pr_updates(&app, &cleanup_store, config.providers.github().unwrap()).await;
+    check_build_lifecycle(&app, &cleanup_store, config.providers.github().unwrap()).await;
+    check_live_events(
+        &app,
+        &cleanup_store,
+        &cookie,
+        config.providers.github().unwrap(),
+    )
+    .await;
     check_app_crud(
         &app,
         &cleanup_store,
@@ -486,6 +498,8 @@ async fn check_http(store: Store, database_url: &str) {
         &config.worker,
     )
     .await;
+
+    check_password_reset(&app, &cleanup_store, &cookie, &config).await;
 
     toasty::sql::statement("DELETE FROM users WHERE id = 1")
         .exec(&mut cleanup_store.database())
@@ -816,6 +830,7 @@ async fn check_app_crud(
     );
     assert!(saved.spa);
     assert!(saved.workflow_pr.is_some());
+    assert_eq!(saved.workflow_pr_state.as_deref(), Some("open"));
     input.build_command = "npm run build -- --base=/".into();
     assert_eq!(
         router
@@ -832,6 +847,14 @@ async fn check_app_crud(
             .await
             .unwrap()
             .workflow_pr
+            .is_none()
+    );
+    assert!(
+        store
+            .find_app(record.id)
+            .await
+            .unwrap()
+            .workflow_pr_state
             .is_none()
     );
     for _ in 0..2 {
@@ -942,4 +965,1263 @@ async fn check_app_crud(
             .await
             .unwrap();
     }
+}
+
+async fn check_deployment_resources(router: &axum::Router, store: &Store, cookie: &str) {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    let nonce = rand::random::<u32>();
+    let mut apps = Vec::new();
+    for suffix in ["history", "other"] {
+        let app = store
+            .create_app(
+                "github",
+                &NewApp {
+                    repository: format!("test/{suffix}-{nonce}"),
+                    branch: "main".into(),
+                    domain: format!("{suffix}-{nonce}.example.com"),
+                    build_config: Default::default(),
+                    install_command: String::new(),
+                    build_command: String::new(),
+                    output_directory: ".".into(),
+                    spa: false,
+                },
+            )
+            .await
+            .unwrap();
+        apps.push(app);
+    }
+    let mut ids = Vec::new();
+    for index in 0..104_u64 {
+        let app_id = apps[usize::from(index == 103)].id;
+        let deployment = deployer::storage::models::Deployment::create()
+            .event_key(format!("resource-test-{nonce}-{index}"))
+            .app_id(app_id)
+            .run_id(index + 1)
+            .attempt(1_u32)
+            .commit_sha("a".repeat(40))
+            .status("live")
+            .created_at(deployer::now())
+            .exec(&mut store.database())
+            .await
+            .unwrap();
+        if index < 103 {
+            ids.push(deployment.id);
+        }
+    }
+    ids.reverse();
+    let request = |uri: &str, authenticated: bool| {
+        let mut builder = Request::builder().uri(uri);
+        if authenticated {
+            builder = builder.header("cookie", cookie);
+        }
+        builder.body(Body::empty()).unwrap()
+    };
+    let uri = format!("/api/apps/{}/deployments", apps[0].id);
+    let first = router.clone().oneshot(request(&uri, true)).await.unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first: serde_json::Value =
+        serde_json::from_slice(&to_bytes(first.into_body(), 1_000_000).await.unwrap()).unwrap();
+    let first_ids: Vec<u64> = first["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["id"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(first_ids, ids[..100]);
+    let second = router
+        .clone()
+        .oneshot(request(&format!("{uri}?before={}", first_ids[99]), true))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let second: serde_json::Value =
+        serde_json::from_slice(&to_bytes(second.into_body(), 65536).await.unwrap()).unwrap();
+    let second_ids: Vec<u64> = second["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["id"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(second_ids, ids[100..]);
+    let empty = store
+        .app_deployments_before(apps[0].id, Some(*ids.last().unwrap()))
+        .await
+        .unwrap();
+    assert!(empty.is_empty());
+    let detail = format!("/api/deployments/{}", ids[0]);
+    let response = router
+        .clone()
+        .oneshot(request(&detail, true))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(json["data"]["id"], ids[0].to_string());
+    assert_eq!(json["data"]["attributes"]["appId"], apps[0].id);
+    assert_eq!(json["data"]["attributes"]["commitSha"], "a".repeat(40));
+    for path in [&uri, &detail] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(path, false))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    for path in [
+        "/api/deployments/18446744073709551615".to_owned(),
+        "/api/apps/18446744073709551615/deployments".to_owned(),
+    ] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&path, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&format!("{uri}?before=invalid"), true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    for app in apps {
+        toasty::sql::statement("DELETE FROM deployments WHERE app_id = ?")
+            .bind(app.id)
+            .exec(&mut store.database())
+            .await
+            .unwrap();
+        toasty::sql::statement("DELETE FROM apps WHERE id = ?")
+            .bind(app.id)
+            .exec(&mut store.database())
+            .await
+            .unwrap();
+    }
+}
+
+async fn check_session_metadata(router: &axum::Router, cookie: &str) {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    let unauthorized = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let document: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(document["data"]["type"], "sessions");
+    assert_eq!(document["data"]["id"], "current");
+    let attributes = &document["data"]["attributes"];
+    assert_eq!(attributes["authenticated"], true);
+    assert_eq!(attributes.as_object().unwrap().len(), 2);
+    assert_eq!(
+        attributes["user"],
+        serde_json::json!({
+            "id": 1, "name": "Zoë Masinde", "email": "root@example.com"
+        })
+    );
+}
+
+async fn check_workflow_pr_updates(
+    router: &axum::Router,
+    store: &Store,
+    github: &deployer::config::Github,
+) {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+    use tower::ServiceExt;
+
+    let nonce = rand::random::<u32>();
+    let app = store
+        .create_app(
+            "github",
+            &NewApp {
+                repository: format!("events/repo-{nonce}"),
+                branch: "main".into(),
+                domain: format!("events-{nonce}.example.com"),
+                build_config: Default::default(),
+                install_command: String::new(),
+                build_command: String::new(),
+                output_directory: ".".into(),
+                spa: false,
+            },
+        )
+        .await
+        .unwrap();
+    let url = format!("https://github.com/{}/pull/1", app.repository);
+    assert!(app.workflow_pr_state.is_none());
+    store.set_pr(app.id, &url).await.unwrap();
+    assert_eq!(
+        store
+            .app(app.id)
+            .await
+            .unwrap()
+            .workflow_pr_state
+            .as_deref(),
+        Some("open")
+    );
+    let event = |action: &str, state: &str, merged: bool, timestamp: &str| {
+        serde_json::json!({
+            "action": action, "installation": { "id": github.installation_id },
+            "repository": { "full_name": app.repository.to_uppercase() },
+            "pull_request": { "html_url": url, "state": state, "merged": merged, "updated_at": timestamp }
+        })
+    };
+    let request = |event: &serde_json::Value, valid_signature: bool| {
+        let bytes = serde_json::to_vec(event).unwrap();
+        let mut mac = Hmac::<Sha256>::new_from_slice(github.webhook_secret.as_bytes()).unwrap();
+        mac.update(&bytes);
+        let signature = if valid_signature {
+            format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+        } else {
+            format!("sha256={}", "0".repeat(64))
+        };
+        Request::builder()
+            .method("POST")
+            .uri("/api/webhooks/github")
+            .header("x-github-event", "pull_request")
+            .header("x-hub-signature-256", signature)
+            .header("content-type", "application/json")
+            .body(Body::from(bytes))
+            .unwrap()
+    };
+    let closed = event("closed", "closed", false, "2026-10-16T09:00:00Z");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&closed, false))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let mut wrong_installation = closed.clone();
+    wrong_installation["installation"]["id"] = serde_json::json!(github.installation_id + 1);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&wrong_installation, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        store
+            .app(app.id)
+            .await
+            .unwrap()
+            .workflow_pr_state
+            .as_deref(),
+        Some("open")
+    );
+    let mut unrelated = closed.clone();
+    unrelated["pull_request"]["html_url"] =
+        serde_json::json!(format!("https://github.com/{}/pull/99", app.repository));
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&unrelated, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    unrelated = closed.clone();
+    unrelated["repository"]["full_name"] = serde_json::json!("unrelated/repository");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&unrelated, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        store
+            .app(app.id)
+            .await
+            .unwrap()
+            .workflow_pr_state
+            .as_deref(),
+        Some("open")
+    );
+    for (payload, expected) in [
+        (closed, "closed"),
+        (
+            event("reopened", "open", false, "2026-10-16T10:00:00Z"),
+            "open",
+        ),
+        (
+            event("closed", "closed", false, "2026-10-16T08:00:00Z"),
+            "open",
+        ),
+        (
+            event("closed", "closed", true, "2026-10-16T11:00:00Z"),
+            "merged",
+        ),
+        (
+            event("closed", "closed", true, "2026-10-16T11:00:00Z"),
+            "merged",
+        ),
+        (
+            event("reopened", "open", false, "2026-10-16T12:00:00Z"),
+            "merged",
+        ),
+    ] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&payload, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            store
+                .app(app.id)
+                .await
+                .unwrap()
+                .workflow_pr_state
+                .as_deref(),
+            Some(expected)
+        );
+    }
+    let new_url = format!("https://github.com/{}/pull/2", app.repository);
+    store.set_pr(app.id, &new_url).await.unwrap();
+    let row = deployer::storage::models::App::filter_by_id(app.id)
+        .first()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(row.workflow_pr_updated_at.is_none());
+    let old_pr = event("closed", "closed", true, "2026-10-16T13:00:00Z");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&old_pr, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        store
+            .app(app.id)
+            .await
+            .unwrap()
+            .workflow_pr_state
+            .as_deref(),
+        Some("open")
+    );
+    deployer::storage::models::App::filter_by_id(app.id)
+        .update()
+        .deleted_at(Some(deployer::now()))
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    let mut deleted = old_pr;
+    deleted["pull_request"]["html_url"] = serde_json::json!(new_url);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&deleted, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let row = deployer::storage::models::App::filter_by_id(app.id)
+        .first()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.workflow_pr_state.as_deref(), Some("open"));
+    assert!(store.app_deployments(app.id).await.unwrap().is_empty());
+    toasty::sql::statement("DELETE FROM apps WHERE id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+}
+
+async fn check_build_lifecycle(
+    router: &axum::Router,
+    store: &Store,
+    github: &deployer::config::Github,
+) {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use deployer::storage::models::Job;
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+    use tower::ServiceExt;
+
+    let nonce = rand::random::<u32>();
+    let app = store
+        .create_app(
+            "github",
+            &NewApp {
+                repository: format!("builds/repo-{nonce}"),
+                branch: "main".into(),
+                domain: format!("builds-{nonce}.example.com"),
+                build_config: Default::default(),
+                install_command: String::new(),
+                build_command: String::new(),
+                output_directory: ".".into(),
+                spa: false,
+            },
+        )
+        .await
+        .unwrap();
+    let event = |run: u64, attempt: u32, action: &str, conclusion: Option<&str>| {
+        serde_json::json!({
+            "action": action, "installation": { "id": github.installation_id },
+            "repository": { "full_name": app.repository },
+            "workflow_run": { "id": run, "run_attempt": attempt, "head_branch": "main",
+                "head_sha": "a".repeat(40), "event": "push", "conclusion": conclusion,
+                "path": deployer::providers::github::workflow::PATH,
+                "head_repository": { "full_name": app.repository } }
+        })
+    };
+    let request = |payload: &serde_json::Value| {
+        let bytes = serde_json::to_vec(payload).unwrap();
+        let mut mac = Hmac::<Sha256>::new_from_slice(github.webhook_secret.as_bytes()).unwrap();
+        mac.update(&bytes);
+        Request::builder()
+            .method("POST")
+            .uri("/api/webhooks/github")
+            .header("x-github-event", "workflow_run")
+            .header(
+                "x-hub-signature-256",
+                format!("sha256={}", hex::encode(mac.finalize().into_bytes())),
+            )
+            .body(Body::from(bytes))
+            .unwrap()
+    };
+    for (field, value) in [
+        ("path", serde_json::json!(".github/workflows/unrelated.yml")),
+        ("event", serde_json::json!("pull_request")),
+        (
+            "head_repository",
+            serde_json::json!({ "full_name": "other/fork" }),
+        ),
+        ("head_branch", serde_json::json!("other-branch")),
+    ] {
+        let mut ignored = event(10, 1, "in_progress", None);
+        ignored["workflow_run"][field] = value;
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&ignored))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    let mut invalid = event(10, 1, "in_progress", None);
+    invalid["workflow_run"]["head_sha"] = serde_json::json!("invalid");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&invalid))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    invalid = event(10, 1, "in_progress", None);
+    invalid["installation"]["id"] = serde_json::json!(github.installation_id + 1);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&invalid))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(store.app_deployments(app.id).await.unwrap().is_empty());
+    for action in ["requested", "in_progress", "in_progress"] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&event(11, 1, action, None)))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    let history = store.app_deployments(app.id).await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].status, "building");
+    assert!(history[0].error.is_none());
+    assert!(history[0].finished_at.is_none());
+    assert!(
+        Job::filter_by_deployment_id(history[0].id)
+            .exec(&mut store.database())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    for (action, conclusion) in [
+        ("completed", Some("failure")),
+        ("completed", Some("failure")),
+        ("in_progress", None),
+    ] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&event(11, 1, action, conclusion)))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    let history = store.app_deployments(app.id).await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].status, "failed");
+    assert_eq!(
+        history[0].error.as_deref(),
+        Some("GitHub workflow concluded: failure")
+    );
+    assert!(history[0].finished_at.is_some());
+    assert!(
+        Job::filter_by_deployment_id(history[0].id)
+            .exec(&mut store.database())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&event(12, 1, "requested", None)))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let success = event(12, 1, "completed", Some("success"));
+    let (first, second) = tokio::join!(
+        router.clone().oneshot(request(&success)),
+        router.clone().oneshot(request(&success))
+    );
+    assert_eq!(first.unwrap().status(), StatusCode::ACCEPTED);
+    assert_eq!(second.unwrap().status(), StatusCode::ACCEPTED);
+    let history = store.app_deployments(app.id).await.unwrap();
+    assert_eq!(history.len(), 2);
+    let queued = history.iter().find(|d| d.run_id == 12).unwrap();
+    assert_eq!(queued.status, "queued");
+    assert!(queued.finished_at.is_none());
+    assert_eq!(
+        Job::filter_by_deployment_id(queued.id)
+            .exec(&mut store.database())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    for (action, conclusion) in [("in_progress", None), ("completed", Some("failure"))] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&event(12, 1, action, conclusion)))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    assert_eq!(store.deployment(queued.id).await.unwrap().status, "queued");
+    let job = store.next().await.unwrap().unwrap();
+    assert!(matches!(job.task, deployer::domain::JobTask::Deployment(id) if id == queued.id));
+    store.finish(job.id, "live", None).await.unwrap();
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&event(12, 1, "in_progress", None)))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(store.deployment(queued.id).await.unwrap().status, "live");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&event(12, 2, "in_progress", None)))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&event(12, 2, "completed", Some("cancelled"))))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let history = store.app_deployments(app.id).await.unwrap();
+    assert_eq!(history.len(), 3);
+    let retry = history.iter().find(|d| d.attempt == 2).unwrap();
+    assert_eq!(retry.status, "failed");
+    assert_ne!(retry.id, queued.id);
+    assert!(
+        Job::filter_by_deployment_id(retry.id)
+            .exec(&mut store.database())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    deployer::storage::models::App::filter_by_id(app.id)
+        .update()
+        .deleted_at(Some(deployer::now()))
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&event(13, 1, "in_progress", None)))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(store.app_deployments(app.id).await.unwrap().len(), 3);
+    toasty::sql::statement(
+        "DELETE FROM jobs WHERE deployment_id IN (SELECT id FROM deployments WHERE app_id = ?)",
+    )
+    .bind(app.id)
+    .exec(&mut store.database())
+    .await
+    .unwrap();
+    toasty::sql::statement("DELETE FROM deployments WHERE app_id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    toasty::sql::statement("DELETE FROM apps WHERE id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+}
+
+async fn check_live_events(
+    router: &axum::Router,
+    store: &Store,
+    cookie: &str,
+    github: &deployer::config::Github,
+) {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+    use std::time::Duration;
+    use tokio_stream::StreamExt;
+    use tower::ServiceExt;
+
+    for cookie in [
+        None,
+        Some("deployer_session=invalid".to_owned()),
+        Some(format!(
+            "deployer_session={}",
+            deployer::application::sessions::issue(&"a".repeat(64), deployer::now() - 1)
+        )),
+    ] {
+        let mut request = Request::builder().uri("/api/events");
+        if let Some(cookie) = cookie {
+            request = request.header("cookie", cookie);
+        }
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let nonce = rand::random::<u32>();
+    let app = store
+        .create_app(
+            "github",
+            &NewApp {
+                repository: format!("live/repo-{nonce}"),
+                branch: "main".into(),
+                domain: format!("live-{nonce}.example.com"),
+                build_config: Default::default(),
+                install_command: String::new(),
+                build_command: String::new(),
+                output_directory: ".".into(),
+                spa: false,
+            },
+        )
+        .await
+        .unwrap();
+    let url = format!("https://github.com/{}/pull/1", app.repository);
+    store.set_pr(app.id, &url).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/events")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert_eq!(response.headers()["x-accel-buffering"], "no");
+    let mut stream = response.into_body().into_data_stream();
+    let decode = |bytes: &[u8]| {
+        let frame = std::str::from_utf8(bytes).unwrap();
+        assert!(frame.contains("event: snapshot"));
+        serde_json::from_str::<serde_json::Value>(
+            frame
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let snapshot = decode(&frame);
+    assert!(snapshot["deployments"].is_array());
+    let row = snapshot["apps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == app.id)
+        .unwrap();
+    assert_eq!(row["workflowPrState"], "open");
+    assert!(snapshot.get("user").is_none());
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "action": "closed", "installation": { "id": github.installation_id },
+        "repository": { "full_name": app.repository },
+        "pull_request": { "html_url": url, "state": "closed", "merged": true, "updated_at": "2026-10-16T14:00:00Z" }
+    })).unwrap();
+    let mut mac = Hmac::<Sha256>::new_from_slice(github.webhook_secret.as_bytes()).unwrap();
+    mac.update(&bytes);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/webhooks/github")
+                    .header("x-github-event", "pull_request")
+                    .header(
+                        "x-hub-signature-256",
+                        format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+                    )
+                    .body(Body::from(bytes))
+                    .unwrap()
+            )
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let frame = tokio::time::timeout(Duration::from_secs(1), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let snapshot = decode(&frame);
+    let row = snapshot["apps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == app.id)
+        .unwrap();
+    assert_eq!(row["workflowPrState"], "merged");
+    store.notify_changes();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), stream.next())
+            .await
+            .is_err()
+    );
+    // A separate worker process cannot share Notify; its database writes must still reach the stream.
+    toasty::sql::statement("UPDATE apps SET https_error = 'worker update' WHERE id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(3), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let snapshot = decode(&frame);
+    let row = snapshot["apps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == app.id)
+        .unwrap();
+    assert_eq!(row["https"]["error"], "worker update");
+    drop(stream);
+    toasty::sql::statement("DELETE FROM apps WHERE id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+}
+
+async fn check_password_reset(
+    app: &axum::Router,
+    store: &Store,
+    cookie: &str,
+    config: &deployer::config::Config,
+) {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tokio_stream::StreamExt;
+    use tower::ServiceExt;
+    let baseline_job = deployer::storage::models::Job::all()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|job| job.id)
+        .max()
+        .unwrap_or(0);
+    let request = |method: &str, path: &str, attributes: serde_json::Value, origin: bool| {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", "application/vnd.api+json");
+        if origin {
+            builder = builder.header("origin", "http://127.0.0.1:8080");
+        }
+        builder
+            .body(Body::from(
+                serde_json::json!({"data":{"type":"password-resets","attributes":attributes}})
+                    .to_string(),
+            ))
+            .unwrap()
+    };
+    let denied = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/password-resets",
+            serde_json::json!({"email":"root@example.com"}),
+            false,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    let started = tokio::time::Instant::now();
+    let unknown = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/password-resets",
+            serde_json::json!({"email":"unknown@example.com"}),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert!(started.elapsed() >= std::time::Duration::from_secs(1));
+    assert_eq!(unknown.status(), StatusCode::ACCEPTED);
+    let unknown_body = to_bytes(unknown.into_body(), 65536).await.unwrap();
+    let known = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/password-resets",
+            serde_json::json!({"email":"root@example.com"}),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(known.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        unknown_body,
+        to_bytes(known.into_body(), 65536).await.unwrap()
+    );
+    let mail_jobs = deployer::storage::models::Job::all()
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    let reset_job = mail_jobs
+        .iter()
+        .filter(|j| j.kind == "email")
+        .filter_map(|j| j.payload.as_deref())
+        .filter_map(|p| serde_json::from_str::<deployer::mail::Email>(p).ok())
+        .find(|e| e.subject == "Reset your Deployer password")
+        .expect("queued reset email");
+    let link = reset_job
+        .text
+        .lines()
+        .find(|line| line.contains("/reset-password#token="))
+        .unwrap();
+    assert!(link.starts_with("http://127.0.0.1:8080/reset-password#token="));
+    let token = link.split("#token=").nth(1).unwrap().to_owned();
+    assert_eq!(token.len(), 64);
+    let stored = deployer::storage::models::PasswordReset::filter_by_id(1_u64)
+        .first()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!stored.used);
+    assert_eq!(stored.expires_at - stored.created_at, 1800);
+    assert_ne!(stored.token_hash, token);
+    assert!(deployer::application::sessions::reset_matches(
+        &config.server.session_secret,
+        &token,
+        &stored.token_hash
+    ));
+    let before = mail_jobs.len();
+    app.clone()
+        .oneshot(request(
+            "POST",
+            "/api/password-resets",
+            serde_json::json!({"email":"root@example.com"}),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        deployer::storage::models::Job::all()
+            .exec(&mut store.database())
+            .await
+            .unwrap()
+            .len(),
+        before
+    );
+    let password = "new-password-long-enough-for-tests";
+    let attributes = serde_json::json!({"token":token,"password":password,"confirmation":password});
+    let retained = deployer::storage::models::PasswordReset::filter_by_id(1_u64)
+        .first()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.token_hash, stored.token_hash);
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "PATCH",
+                "/api/password-resets/current",
+                attributes.clone(),
+                false
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    for password in ["a".repeat(14), "🦀".repeat(14), "🦀".repeat(257)] {
+        let data =
+            serde_json::json!({"token": token, "password": password, "confirmation": password});
+        assert_eq!(
+            app.clone()
+                .oneshot(request("PATCH", "/api/password-resets/current", data, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let mut mismatch = attributes.clone();
+    mismatch["confirmation"] = serde_json::json!("does not match");
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "PATCH",
+                "/api/password-resets/current",
+                mismatch,
+                true
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    deployer::storage::models::PasswordReset::filter_by_id(1_u64)
+        .update()
+        .expires_at(deployer::now() - 1)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "PATCH",
+                "/api/password-resets/current",
+                attributes.clone(),
+                true
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    deployer::storage::models::PasswordReset::filter_by_id(1_u64)
+        .update()
+        .expires_at(stored.expires_at)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    let mut bad = attributes.clone();
+    bad["token"] = serde_json::json!("b".repeat(64));
+    let response = app
+        .clone()
+        .oneshot(request("PATCH", "/api/password-resets/current", bad, true))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let live = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/events")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(live.status(), StatusCode::OK);
+    let mut stream = live.into_body().into_data_stream();
+    tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let response = app
+        .clone()
+        .oneshot(request(
+            "PATCH",
+            "/api/password-resets/current",
+            attributes.clone(),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let consumed = deployer::storage::models::PasswordReset::filter_by_id(1_u64)
+        .first()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(consumed.used);
+    assert!(consumed.token_hash.is_empty());
+    assert!(
+        response.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .contains("SameSite=Strict")
+    );
+    assert!(
+        response.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "PATCH",
+                "/api/password-resets/current",
+                attributes,
+                true
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let old_session = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(old_session.status(), StatusCode::UNAUTHORIZED);
+    let login = app.clone().oneshot(Request::builder().method("POST").uri("/api/session")
+        .header("origin", "http://127.0.0.1:8080").header("content-type", "application/vnd.api+json")
+        .body(Body::from(serde_json::json!({"data":{"type":"sessions","attributes":{"email":"root@example.com","password":password}}}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let new_cookie = login.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    assert_eq!(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/session")
+                    .header("cookie", new_cookie)
+                    .body(Body::empty())
+                    .unwrap()
+            )
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let notifications = deployer::storage::models::Job::all()
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    assert!(
+        notifications
+            .iter()
+            .filter_map(|job| job.payload.as_deref())
+            .filter_map(|payload| serde_json::from_str::<deployer::mail::Email>(payload).ok())
+            .any(|mail| mail.subject == "Your Deployer password was changed")
+    );
+    let user = store.root_account().await.unwrap().unwrap();
+    assert!(
+        deployer::application::sessions::verify_password(
+            password.into(),
+            user.password_hash.clone()
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        !deployer::application::sessions::verify_password(
+            "test-password-long-enough".into(),
+            user.password_hash.clone()
+        )
+        .await
+        .unwrap()
+    );
+    let notification = deployer::mail::SystemEmail::PasswordChanged {
+        name: &user.name,
+        link: &config.server.public_url,
+    }
+    .render(&user.email)
+    .unwrap();
+    let now = deployer::now() + 61;
+    let second = "c".repeat(64);
+    assert!(
+        store
+            .request_password_reset(
+                &user.email,
+                &config.server.session_secret,
+                &second,
+                Some(&notification),
+                now
+            )
+            .await
+            .unwrap()
+    );
+    assert!(
+        !store
+            .password_reset_valid(&config.server.session_secret, &second, now + 1800)
+            .await
+            .unwrap()
+    );
+    let (left, right) = tokio::join!(
+        store.consume_password_reset(
+            &config.server.session_secret,
+            &second,
+            &user.password_hash,
+            &notification,
+            now
+        ),
+        store.consume_password_reset(
+            &config.server.session_secret,
+            &second,
+            &user.password_hash,
+            &notification,
+            now
+        )
+    );
+    assert_ne!(
+        left.unwrap(),
+        right.unwrap(),
+        "only one concurrent reset may consume a token"
+    );
+    toasty::sql::statement("DELETE FROM jobs WHERE kind = 'email' AND id > ?")
+        .bind(baseline_job)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
 }

@@ -29,6 +29,7 @@ fn app() -> App {
         output_directory: "dist".into(),
         spa: false,
         workflow_pr: None,
+        workflow_pr_state: None,
         deletion_requested: false,
         https: Default::default(),
     }

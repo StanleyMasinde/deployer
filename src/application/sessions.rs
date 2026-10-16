@@ -42,3 +42,29 @@ pub async fn verify_password(password: String, hash: String) -> anyhow::Result<b
     })
     .await?
 }
+
+/// Password changes revoke every session without changing the instance secret.
+pub fn credential_key(secret: &str, password_hash: &str) -> String {
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
+    mac.update(b"deployer-session-credential-v1:");
+    mac.update(password_hash.as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+}
+pub fn reset_digest(secret: &str, token: &str) -> String {
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
+    mac.update(b"deployer-password-reset-v1:");
+    mac.update(token.as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+}
+pub fn reset_matches(secret: &str, token: &str, expected: &str) -> bool {
+    let Ok(bytes) = hex::decode(expected) else {
+        return false;
+    };
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepts any key length");
+    mac.update(b"deployer-password-reset-v1:");
+    mac.update(token.as_bytes());
+    mac.verify_slice(&bytes).is_ok()
+}

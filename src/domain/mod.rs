@@ -20,6 +20,7 @@ pub struct App {
     pub output_directory: String,
     pub spa: bool,
     pub workflow_pr: Option<String>,
+    pub workflow_pr_state: Option<String>,
     pub deletion_requested: bool,
     pub https: Https,
 }

@@ -3,7 +3,7 @@
  * Nav: N9 edge-aligned minimal · footer: Ft2 inline-rule
  * Audience: VPS owners · use: connect and monitor static apps · tone: utilitarian
  */
-@import "./assets/tokens.css";
+@import './assets/tokens.css';
 
 * {
   box-sizing: border-box;
@@ -239,7 +239,7 @@ label {
   font-size: 13px;
   font-weight: 500;
 }
-input:not([type="checkbox"]),
+input:not([type='checkbox']),
 .select-trigger {
   width: 100%;
   min-width: 0;
@@ -278,7 +278,7 @@ input:not([type="checkbox"]),
   padding: 0;
   font-size: 13px;
 }
-.checkbox-control[data-state="checked"] {
+.checkbox-control[data-state='checked'] {
   background: var(--color-accent);
   border-color: var(--color-accent);
   color: var(--color-accent-ink);
@@ -372,7 +372,7 @@ input:not([type="checkbox"]),
   border-radius: var(--radius-control);
   white-space: nowrap;
 }
-.status[data-status="failed"] {
+.status[data-status='failed'] {
   color: var(--color-error);
   background: var(--color-error-paper);
 }
@@ -575,7 +575,106 @@ html {
   font-size: var(--text-small);
   margin: var(--space-xs) 0 var(--space-control);
 }
-input[aria-invalid="true"],
-.select-trigger[aria-invalid="true"] {
+input[aria-invalid='true'],
+.select-trigger[aria-invalid='true'] {
   border-color: var(--color-error);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .console-dialog-overlay,
+  .confirm-overlay {
+    backdrop-filter: none;
+    background: var(--color-paper);
+    opacity: 0.95;
+  }
+}
+@media (forced-colors: active) {
+  button,
+  input,
+  .select-trigger,
+  .console-modal,
+  .console-confirm {
+    border: 1px solid ButtonText;
+  }
+  a[aria-current='page'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  :focus-visible {
+    outline: 3px solid Highlight;
+  }
+}
+@media (max-width: 47.99rem) {
+  input:not([type='checkbox']),
+  .select-trigger,
+  .deployment-console input,
+  .deployment-console .select-trigger,
+  .console-modal input,
+  .console-modal .select-trigger {
+    font-size: 16px;
+  }
+}
+.brand-mark {
+  color: var(--color-accent);
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+.console-brand > .brand-mark {
+  margin-right: var(--space-xs);
+}
+
+.navigation-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 3px;
+  z-index: 100;
+  overflow: clip;
+  pointer-events: none;
+  background: var(--color-tint);
+}
+.navigation-progress > span {
+  display: block;
+  height: 100%;
+  width: 35%;
+  background: var(--color-accent);
+  animation: navigation-loading 1.1s ease-in-out infinite;
+}
+@keyframes navigation-loading {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(390%);
+  }
+}
+.sr-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: clip;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .navigation-progress > span {
+    animation: none;
+    width: 100%;
+  }
 }

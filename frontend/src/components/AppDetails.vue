@@ -1,184 +1,149 @@
 <script setup lang="ts">
-import { deletionSchema, useValidation } from "../validation";
-const { errors: fieldErrors, validate } = useValidation();
-import { ref, watch, computed, onUnmounted } from "vue";
-import {
-  DialogRoot,
-  DialogPortal,
-  DialogOverlay,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-  DialogClose,
-  AlertDialogRoot,
-  AlertDialogTrigger,
-  AlertDialogPortal,
-  AlertDialogOverlay,
-  AlertDialogContent,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogCancel,
-  Label,
-} from "reka-ui";
-import { httpsStatus, appUrl } from "../https";
-import { request, type App, type Deployment } from "../api/client";
-import UiButton from "./ui/UiButton.vue";
-import UiInput from "./ui/UiInput.vue";
-import UiIcon from "./ui/UiIcon.vue";
-const props = defineProps<{ open: boolean; appId: number | null }>();
+import { ref, watch, computed, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { TabsRoot, TabsList, TabsTrigger, TabsContent } from 'reka-ui'
+const route = useRoute(),
+  router = useRouter()
+const tab = computed(() => (route.query.tab === 'deployments' ? 'deployments' : 'overview'))
+function changeTab(value: string | number) {
+  void router.push({
+    query: { ...route.query, tab: value === 'overview' ? undefined : String(value) },
+  })
+}
+import { httpsStatus, appUrl } from '../https'
+import { request, type App, type Deployment } from '../api/client'
+import UiButton from './ui/UiButton.vue'
+import UiIcon from './ui/UiIcon.vue'
+const props = defineProps<{
+  open: boolean
+  appId: number | null
+  initialApp?: App
+  initialDeployments?: Deployment[]
+}>()
 const emit = defineEmits<{
-  "update:open": [boolean];
-  edit: [App];
-  changed: [];
-  closeAutoFocus: [Event];
-}>();
-const app = ref<App>();
-const deployments = ref<Deployment[]>([]);
-const loading = ref(false),
-  busy = ref(false),
-  error = ref(""),
-  confirming = ref(false),
-  confirmation = ref("");
-const certificateStatus = computed(() =>
-  app.value ? httpsStatus(app.value.domain, app.value.https) : "disabled",
-);
-let poll: ReturnType<typeof setInterval> | undefined;
-watch(
-  () => props.open,
-  (open) => {
-    clearInterval(poll);
-    if (open)
-      poll = setInterval(async () => {
-        if (busy.value || confirming.value || !app.value) return;
-        const id = props.appId;
-        try {
-          const record = await request<App>(`/apps/${id}`);
-          if (props.open && props.appId === id) app.value = record;
-        } catch {
-          /* Retry on the next poll. */
-        }
-      }, 5000);
-  },
-);
-onUnmounted(() => {
-  clearInterval(poll);
-  generation++;
-});
-async function enableHttps() {
-  if (!app.value) return;
-  busy.value = true;
-  error.value = "";
+  'update:open': [boolean]
+  edit: [App]
+  changed: []
+  closeAutoFocus: [Event]
+}>()
+const app = ref<App | undefined>(props.initialApp)
+const deployments = ref<Deployment[]>(props.initialDeployments ?? [])
+const loadingOlder = ref(false)
+const hasOlder = ref((props.initialDeployments?.length ?? 0) === 100)
+function mergeHistory(records: Deployment[]) {
+  const history = new Map(deployments.value.map((d) => [d.id, d]))
+  for (const record of records) history.set(record.id, record)
+  deployments.value = [...history.values()].sort((a, b) => b.id - a.id)
+}
+async function loadOlder() {
+  if (!app.value || loadingOlder.value) return
+  loadingOlder.value = true
+  error.value = ''
   try {
-    app.value = await request<App>(`/apps/${app.value.id}/https`, { method: "POST" });
-    emit("changed");
+    const records = await request<Deployment[]>(
+      `/apps/${app.value.id}/deployments?before=${Math.min(...deployments.value.map((d) => d.id))}`,
+    )
+    mergeHistory(records)
+    hasOlder.value = records.length === 100
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not request HTTPS.";
+    error.value = cause instanceof Error ? cause.message : 'Could not load older deployments.'
   } finally {
-    busy.value = false;
+    loadingOlder.value = false
   }
 }
-let generation = 0;
+const loading = ref(false),
+  busy = ref(false),
+  error = ref('')
+const certificateStatus = computed(() =>
+  app.value ? httpsStatus(app.value.domain, app.value.https) : 'disabled',
+)
+onUnmounted(() => {
+  generation++
+})
+async function enableHttps() {
+  if (!app.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    app.value = await request<App>(`/apps/${app.value.id}/https`, { method: 'POST' })
+    emit('changed')
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : 'Could not request HTTPS.'
+  } finally {
+    busy.value = false
+  }
+}
+let generation = 0
 async function load() {
-  const current = ++generation;
-  if (!props.open || props.appId === null) return;
-  loading.value = true;
-  error.value = "";
+  const current = ++generation
+  if (!props.open || props.appId === null) return
+  loading.value = true
+  error.value = ''
   try {
     const [record, history] = await Promise.all([
       request<App>(`/apps/${props.appId}`),
       request<Deployment[]>(`/apps/${props.appId}/deployments`),
-    ]);
-    if (current !== generation) return;
-    app.value = record;
-    deployments.value = history;
+    ])
+    if (current !== generation) return
+    app.value = record
+    mergeHistory(history)
   } catch (cause) {
     if (current === generation)
-      error.value = cause instanceof Error ? cause.message : "Could not load application.";
+      error.value = cause instanceof Error ? cause.message : 'Could not load application.'
   } finally {
-    if (current === generation) loading.value = false;
+    if (current === generation) loading.value = false
   }
 }
 watch(
-  () => [props.open, props.appId],
+  () => [props.initialApp, props.initialDeployments],
   () => {
-    app.value = undefined;
-    deployments.value = [];
-    confirming.value = false;
-    confirmation.value = "";
-    fieldErrors.value = {};
-    void load();
+    app.value = props.initialApp
+    mergeHistory(props.initialDeployments ?? [])
   },
-  { immediate: true },
-);
-async function remove() {
-  if (
-    !app.value ||
-    !validate(deletionSchema(app.value.domain), { confirmation: confirmation.value })
-  )
-    return;
-  busy.value = true;
-  error.value = "";
-  try {
-    await request(`/apps/${app.value.id}`, { method: "DELETE" });
-    confirming.value = false;
-    emit("update:open", false);
-    emit("changed");
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not delete application.";
-  } finally {
-    busy.value = false;
-  }
-}
+)
 async function workflow() {
-  if (!app.value) return;
-  busy.value = true;
-  error.value = "";
+  if (!app.value) return
+  busy.value = true
+  error.value = ''
   try {
-    app.value = await request<App>(`/apps/${app.value.id}/workflow`, { method: "POST" });
-    emit("changed");
+    app.value = await request<App>(`/apps/${app.value.id}/workflow`, { method: 'POST' })
+    emit('changed')
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not update workflow PR.";
+    error.value = cause instanceof Error ? cause.message : 'Could not update workflow PR.'
   } finally {
-    busy.value = false;
+    busy.value = false
   }
 }
 </script>
 
 <template>
-  <DialogRoot :open="open" @update:open="emit('update:open', $event)"
-    ><DialogPortal
-      ><DialogOverlay class="console-dialog-overlay" /><DialogContent
-        class="console-modal application-details"
-        @close-auto-focus="emit('closeAutoFocus', $event)"
-        @interact-outside="busy && $event.preventDefault()"
-        @escape-key-down="busy && $event.preventDefault()"
-      >
-        <div class="modal-heading">
-          <span class="modal-icon"><UiIcon name="apps" /></span
-          ><DialogClose as-child
-            ><UiButton aria-label="Close application details" :disabled="busy"
-              ><UiIcon name="close" /></UiButton
-          ></DialogClose>
-        </div>
-        <DialogTitle class="modal-title">{{ app?.domain ?? "Application details" }}</DialogTitle>
-        <DialogDescription class="modal-description"
-          >Configuration and deployment history for this application.</DialogDescription
+  <section class="application-detail-page">
+    <p v-if="error" class="console-message is-error" role="alert">{{ error }}</p>
+    <p v-if="loading" role="status">Loading application…</p>
+    <UiButton v-else-if="!app" @click="load">Try again</UiButton>
+    <template v-else>
+      <p v-if="app.deletionRequested" class="console-message" role="status">
+        Deletion requested. The worker will stop serving this application and remove its files and
+        deployment history. If cleanup failed, retry removal below.
+      </p>
+      <div class="detail-actions">
+        <UiButton :disabled="busy || loading" @click="load"
+          ><UiIcon name="refresh" />Refresh details</UiButton
         >
-        <p v-if="error && !confirming" class="console-message is-error" role="alert">{{ error }}</p>
-        <p v-if="loading" role="status">Loading application…</p>
-        <UiButton v-else-if="!app" @click="load">Try again</UiButton>
-        <template v-else>
-          <p v-if="app.deletionRequested" class="console-message" role="status">
-            Deletion requested. The worker will stop serving this application and remove its files
-            and deployment history. If cleanup failed, retry removal below.
-          </p>
-          <div class="detail-actions">
-            <UiButton :disabled="busy || app.deletionRequested" @click="emit('edit', app)"
-              >Edit settings</UiButton
-            ><a class="button" :href="appUrl(app)" target="_blank" rel="noopener noreferrer"
-              >Visit site<UiIcon name="arrow"
-            /></a>
-          </div>
+        <UiButton :disabled="busy || app.deletionRequested" @click="emit('edit', app)"
+          >Edit settings</UiButton
+        ><a class="button" :href="appUrl(app)" target="_blank" rel="noopener noreferrer"
+          >Visit site<UiIcon name="arrow"
+        /></a>
+      </div>
+      <TabsRoot :model-value="tab" @update:model-value="changeTab" class="application-tabs-root">
+        <TabsList class="application-tabs" aria-label="Application sections"
+          ><TabsTrigger value="overview">Overview</TabsTrigger
+          ><TabsTrigger value="deployments"
+            >Deployments <span>{{ deployments.length }}{{ hasOlder ? '+' : '' }}</span></TabsTrigger
+          ></TabsList
+        >
+        <TabsContent value="overview" class="application-detail-grid">
           <section class="detail-section">
             <h2>Source & destination</h2>
             <dl class="detail-values">
@@ -205,7 +170,7 @@ async function workflow() {
               </div>
               <div>
                 <dt>Routing</dt>
-                <dd>{{ app.spa ? "Single-page application" : "Static files" }}</dd>
+                <dd>{{ app.spa ? 'Single-page application' : 'Static files' }}</dd>
               </div>
             </dl>
           </section>
@@ -223,11 +188,11 @@ async function workflow() {
                 "
                 >{{
                   {
-                    disabled: "Not enabled",
-                    pending: "Certificate pending",
-                    active: "HTTPS active",
-                    failed: "Certificate failed",
-                    expired: "Certificate expired",
+                    disabled: 'Not enabled',
+                    pending: 'Certificate pending',
+                    active: 'HTTPS active',
+                    failed: 'Certificate failed',
+                    expired: 'Certificate expired',
                   }[certificateStatus]
                 }}</span
               >
@@ -252,15 +217,31 @@ async function workflow() {
               @click="enableHttps"
               >{{
                 busy
-                  ? "Requesting…"
-                  : certificateStatus === "disabled"
-                    ? "Enable HTTPS"
-                    : "Retry certificate"
+                  ? 'Requesting…'
+                  : certificateStatus === 'disabled'
+                    ? 'Enable HTTPS'
+                    : 'Retry certificate'
               }}</UiButton
             >
           </section>
           <section class="detail-section">
             <h2>Build configuration</h2>
+            <p
+              v-if="app.workflowPr"
+              class="workflow-state"
+              :data-status="app.workflowPrState ?? 'unknown'"
+            >
+              <UiIcon :name="app.workflowPrState === 'merged' ? 'check' : 'repo'" />{{
+                app.workflowPrState === 'merged'
+                  ? 'Workflow PR merged'
+                  : app.workflowPrState === 'closed'
+                    ? 'Workflow PR closed without merging'
+                    : app.workflowPrState === 'open'
+                      ? 'Workflow PR open — awaiting merge'
+                      : 'Workflow PR status has not been received yet'
+              }}
+            </p>
+
             <dl class="detail-values">
               <div>
                 <dt>Deployment type</dt>
@@ -269,7 +250,7 @@ async function workflow() {
               <div>
                 <dt>Ecosystem</dt>
                 <dd>
-                  {{ app.buildConfig.ecosystem === "none" ? "No build tools" : "JavaScript" }}
+                  {{ app.buildConfig.ecosystem === 'none' ? 'No build tools' : 'JavaScript' }}
                 </dd>
               </div>
               <div v-if="app.buildConfig.packageManager">
@@ -280,7 +261,7 @@ async function workflow() {
                 <dt>Framework</dt>
                 <dd>
                   {{
-                    app.buildConfig.framework === "vite" ? "Vite" : "Plain HTML / CSS / JavaScript"
+                    app.buildConfig.framework === 'vite' ? 'Vite' : 'Plain HTML / CSS / JavaScript'
                   }}
                 </dd>
               </div>
@@ -310,17 +291,41 @@ async function workflow() {
                 :href="app.workflowPr"
                 target="_blank"
                 rel="noopener noreferrer"
-                >Open workflow PR<UiIcon name="arrow" /></a
+                >{{
+                  app.workflowPrState === 'merged'
+                    ? 'View merged PR'
+                    : app.workflowPrState === 'closed'
+                      ? 'View closed PR'
+                      : 'Open workflow PR'
+                }}<UiIcon name="arrow" /></a
               ><UiButton :disabled="busy || app.deletionRequested" @click="workflow">{{
-                busy ? "Working…" : "Update workflow PR"
+                busy ? 'Working…' : 'Update workflow PR'
               }}</UiButton>
             </div>
             <p class="field-hint">
               Review and merge workflow changes on GitHub to apply new build settings.
             </p>
           </section>
+          <section class="detail-section danger-section">
+            <h2>Delete application</h2>
+            <p>
+              Stop serving this application and remove its published files and deployment history.
+              Your GitHub repository and workflow stay intact.
+            </p>
+            <RouterLink
+              class="button danger-button"
+              :to="{
+                path: `/console/applications/${app.id}/delete`,
+                query: route.query,
+                state: { modalReturn: route.fullPath },
+              }"
+              >{{ app.deletionRequested ? 'Retry removal' : 'Delete application' }}</RouterLink
+            >
+          </section></TabsContent
+        >
+        <TabsContent value="deployments" class="application-detail-grid">
           <section class="detail-section">
-            <h2>Deployment history</h2>
+            <h2>Deployments</h2>
             <p v-if="!deployments.length" class="field-hint">
               No deployments yet. Merge the workflow PR and push to your connected branch.
             </p>
@@ -330,7 +335,14 @@ async function workflow() {
                   <span class="deployment-status" :data-status="deployment.status">{{
                     deployment.status
                   }}</span
-                  ><code>{{ deployment.commitSha.slice(0, 7) }}</code
+                  ><a
+                    :href="`https://github.com/${app.repository}/commit/${deployment.commitSha}`"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    :aria-label="`View commit ${deployment.commitSha.slice(0, 7)} on GitHub`"
+                    ><code>{{ deployment.commitSha.slice(0, 7) }}</code></a
+                  ><RouterLink :to="`/console/deployments/${deployment.id}`"
+                    >Run #{{ deployment.runId }}</RouterLink
                   ><time :datetime="new Date(deployment.createdAt * 1000).toISOString()">{{
                     new Date(deployment.createdAt * 1000).toLocaleString()
                   }}</time>
@@ -339,59 +351,14 @@ async function workflow() {
               </li>
             </ol>
             <p v-if="deployments.length" class="field-hint">
-              Showing the latest {{ deployments.length }} deployments (up to 100).
+              Showing {{ deployments.length }} deployments.
             </p>
+            <UiButton v-if="hasOlder" :disabled="loadingOlder" @click="loadOlder">{{
+              loadingOlder ? 'Loading…' : 'Load older deployments'
+            }}</UiButton>
           </section>
-          <section class="detail-section danger-section">
-            <h2>Delete application</h2>
-            <p>
-              Stop serving this application and remove its published files and deployment history.
-              Your GitHub repository and workflow stay intact.
-            </p>
-            <AlertDialogRoot v-model:open="confirming"
-              ><AlertDialogTrigger as-child
-                ><UiButton
-                  class="danger-button"
-                  :disabled="busy"
-                  @click="
-                    confirmation = '';
-                    error = '';
-                  "
-                  >{{ app.deletionRequested ? "Retry removal" : "Delete application" }}</UiButton
-                ></AlertDialogTrigger
-              ><AlertDialogPortal
-                ><AlertDialogOverlay class="confirm-overlay" /><AlertDialogContent
-                  class="console-confirm"
-                  @escape-key-down="busy && $event.preventDefault()"
-                  ><AlertDialogTitle>Delete application?</AlertDialogTitle
-                  ><AlertDialogDescription
-                    >The worker will remove the application, its files, and deployment history. This
-                    cannot be undone.</AlertDialogDescription
-                  >
-                  <p v-if="error" class="console-message is-error" role="alert">{{ error }}</p>
-                  <form novalidate @submit.prevent="remove">
-                    <Label for="delete-confirmation">Type {{ app.domain }} to confirm</Label
-                    ><UiInput
-                      id="delete-confirmation"
-                      :error="fieldErrors['confirmation']"
-                      v-model="confirmation"
-                      autocomplete="off"
-                      :disabled="busy"
-                    />
-                    <div class="modal-actions">
-                      <AlertDialogCancel as-child
-                        ><UiButton :disabled="busy">Cancel</UiButton></AlertDialogCancel
-                      ><UiButton type="submit" class="danger-button" :disabled="busy">{{
-                        busy ? "Deleting…" : "Delete application"
-                      }}</UiButton>
-                    </div>
-                  </form></AlertDialogContent
-                ></AlertDialogPortal
-              ></AlertDialogRoot
-            >
-          </section>
-        </template>
-      </DialogContent></DialogPortal
-    ></DialogRoot
-  >
+        </TabsContent>
+      </TabsRoot>
+    </template>
+  </section>
 </template>

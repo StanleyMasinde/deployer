@@ -1,8 +1,8 @@
 <script setup lang="ts">
 definePage({
-  name: "home",
-  meta: { ssg: true, title: "Deployer" },
-});
+  name: 'home',
+  meta: { ssg: true, title: 'Deployer' },
+})
 </script>
 
 <template>

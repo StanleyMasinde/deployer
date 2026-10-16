@@ -1,7 +1,9 @@
 pub mod auth;
+mod events;
 pub mod frontend;
 mod handlers;
 pub mod jsonapi;
+mod password_resets;
 
 use crate::{
     config::Config,
@@ -45,6 +47,7 @@ impl IntoResponse for ApiError {
 
 pub fn router(state: State) -> Router {
     let protected = Router::new()
+        .route("/api/events", get(events::stream))
         .route(
             "/api/session",
             get(handlers::session).delete(handlers::logout),
@@ -60,6 +63,7 @@ pub fn router(state: State) -> Router {
         .route("/api/apps/{id}/workflow", post(handlers::workflow))
         .route("/api/apps/{id}/https", post(handlers::enable_https))
         .route("/api/deployments", get(handlers::deployments))
+        .route("/api/deployments/{id}", get(handlers::deployment))
         .route("/api/repositories", get(handlers::repositories))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -71,6 +75,11 @@ pub fn router(state: State) -> Router {
             get(handlers::setup_status).post(handlers::setup_root),
         )
         .route("/api/session", post(handlers::login))
+        .route("/api/password-resets", post(password_resets::request_reset))
+        .route(
+            "/api/password-resets/current",
+            axum::routing::patch(password_resets::confirm_reset),
+        )
         .route("/api/webhooks/github", post(handlers::webhook))
         .route(
             "/health",

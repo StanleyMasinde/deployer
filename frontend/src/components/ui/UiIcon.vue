@@ -13,9 +13,23 @@ import {
   ArrowPathIcon,
   CheckIcon,
   ChevronDownIcon,
-} from "@heroicons/vue/24/outline";
+  HomeIcon,
+  GlobeAltIcon,
+  BeakerIcon,
+  Cog6ToothIcon,
+  Bars3Icon,
+  ChartBarIcon,
+  ExclamationTriangleIcon,
+} from '@heroicons/vue/24/outline'
 
 const icons = {
+  dashboard: HomeIcon,
+  domains: GlobeAltIcon,
+  previews: BeakerIcon,
+  settings: Cog6ToothIcon,
+  menu: Bars3Icon,
+  resources: ChartBarIcon,
+  attention: ExclamationTriangleIcon,
   apps: Squares2X2Icon,
   activity: BoltIcon,
   server: ServerStackIcon,
@@ -29,8 +43,8 @@ const icons = {
   refresh: ArrowPathIcon,
   check: CheckIcon,
   chevron: ChevronDownIcon,
-};
-defineProps<{ name: keyof typeof icons }>();
+}
+defineProps<{ name: keyof typeof icons }>()
 </script>
 
 <template>

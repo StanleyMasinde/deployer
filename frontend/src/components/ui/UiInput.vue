@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Primitive } from "reka-ui";
-defineOptions({ inheritAttrs: false });
-defineProps<{ error?: string }>();
-const model = defineModel<string>({ default: "" });
+import { Primitive } from 'reka-ui'
+defineOptions({ inheritAttrs: false })
+defineProps<{ error?: string }>()
+const model = defineModel<string>({ default: '' })
 </script>
 <template>
   <Primitive as-child

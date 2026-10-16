@@ -44,6 +44,8 @@ impl Store {
         App::filter_by_id(id)
             .update()
             .workflow_pr(Some(url.to_owned()))
+            .workflow_pr_state(Some("open".to_owned()))
+            .workflow_pr_updated_at(None::<String>)
             .exec(&mut self.db.clone())
             .await?;
 
@@ -132,6 +134,16 @@ impl Store {
                 None
             } else {
                 current.workflow_pr
+            })
+            .workflow_pr_state(if build_changed {
+                None
+            } else {
+                current.workflow_pr_state
+            })
+            .workflow_pr_updated_at(if build_changed {
+                None
+            } else {
+                current.workflow_pr_updated_at
             })
             .exec(&mut tx)
             .await?;
@@ -299,6 +311,18 @@ impl Store {
         .https_error(Some(error.to_owned()))
         .exec(&mut self.db.clone())
         .await?;
+        Ok(())
+    }
+}
+
+impl Store {
+    pub async fn update_workflow_pr(
+        &self,
+        update: &crate::providers::github::webhook::PullRequestUpdate,
+    ) -> anyhow::Result<()> {
+        toasty::sql::statement("UPDATE apps SET workflow_pr_state = ?, workflow_pr_updated_at = ? WHERE provider = 'github' AND LOWER(repository) = LOWER(?) AND workflow_pr = ? AND deleted_at IS NULL AND (workflow_pr_state IS NULL OR workflow_pr_state <> 'merged') AND (workflow_pr_updated_at IS NULL OR workflow_pr_updated_at < ? OR (workflow_pr_updated_at = ? AND ? = 'merged'))")
+            .bind(update.state).bind(&update.updated_at).bind(&update.repository).bind(&update.url).bind(&update.updated_at).bind(&update.updated_at).bind(update.state)
+            .exec(&mut self.db.clone()).await?;
         Ok(())
     }
 }

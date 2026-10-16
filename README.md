@@ -23,8 +23,10 @@ Create the App in the GitHub account or organization that owns your repositories
      verify builds and download artifacts.
    - **Contents**, **Workflows**, and **Pull requests**: read and write, to
      create the build workflow and open its pull request.
-5. Subscribe to **Workflow run** events and create the App for **Only on this
-   account**.
+5. Subscribe to **Workflow run** and **Pull request** events, then create the App
+   for **Only on this account**. Pull request events update the workflow PR state
+   in Deployer when you merge, close, or reopen it. If you already created the App,
+   enable **Pull request** under its webhook event subscriptions.
 6. Record the **Client ID**. That is the JWT issuer. Generate a private key and
    copy the downloaded PEM file to your VPS. The installer asks for its path.
 7. Select **Install App**, install it on the repositories you want to deploy, and
@@ -116,3 +118,20 @@ DNS. The helper tests simulate the ACME client without requesting public certifi
 ## Contributing
 
 See [Contributing](Contributing.md) to run Deployer locally and check your changes.
+
+## Recover your password
+
+Configure SMTP and keep the worker running to deliver password-reset email. Use
+**Forgot password?** on the sign-in page. Deployer returns the same response for
+recognized and unrecognized addresses. It sends at most one reset email per
+account per minute.
+
+Reset links expire after 30 minutes and work once. Production links require the
+configured HTTPS control-panel URL; localhost HTTP is allowed in debug builds.
+The token stays in the URL fragment, so browsers do not send it in HTTP request
+URLs. A successful reset invalidates existing sessions, queues a notification
+email, and requires you to sign in again. New passwords require at least 15
+characters and at most 1024 UTF-8 bytes.
+
+This release binds sessions to the account's password hash. Existing sessions
+issued by earlier releases must sign in again after upgrading.

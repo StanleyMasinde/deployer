@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import "../console.css";
-defineProps<{ title: string; description: string }>();
+import BrandMark from './BrandMark.vue'
+import '../console.css'
+defineProps<{ title: string; description: string }>()
 </script>
 
 <template>
   <div class="deployment-console auth-shell">
     <header class="console-sidebar auth-bar">
       <RouterLink class="console-brand" to="/" aria-label="Deployer home">
-        <span class="brand-symbol" aria-hidden="true">↥</span>Deployer
+        <BrandMark />Deployer
       </RouterLink>
-      <span class="workspace-label">Your instance</span>
     </header>
     <main id="main" class="auth-main">
       <section class="auth-panel" aria-labelledby="auth-title">
