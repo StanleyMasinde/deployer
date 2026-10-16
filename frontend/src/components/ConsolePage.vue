@@ -4,6 +4,9 @@ function clearFilters() {
 }
 
 import BrandMark from './BrandMark.vue'
+import AccountMenu from './AccountMenu.vue'
+import ProfileDetails from './ProfileDetails.vue'
+import type { ConsoleData } from '../router/data'
 import { ref, reactive, computed, watch, watchEffect, provide, onMounted, onUnmounted } from 'vue'
 import { buildPreset, type Ecosystem, type PackageManager } from '../build'
 import { signInSchema, applicationSchema, useValidation } from '../validation'
@@ -32,6 +35,8 @@ const view = computed(
     ({
       applications: 'apps',
       deployments: 'activity',
+      profile: 'profile',
+      personal: 'personal',
       runtimes: 'runtimes',
       resources: 'resources',
       services: 'services',
@@ -46,6 +51,8 @@ const pageTitle = computed(
       apps: 'Applications',
       activity: 'Deployments',
       dashboard: 'Dashboard',
+      profile: 'Profile',
+      personal: 'Personal settings',
       runtimes: 'Runtimes & tools',
       resources: 'Resource usage',
       services: 'Services',
@@ -58,7 +65,9 @@ const deploymentPage = computed(() => Boolean(route.params.deploymentId))
 const application = computed(() => (route.params.appId ? route.meta.applicationData : undefined))
 const applicationPage = computed(() => Boolean(route.params.appId))
 const planned = computed(() =>
-  ['runtimes', 'resources', 'services', 'previews', 'domains', 'settings'].includes(view.value),
+  ['personal', 'runtimes', 'resources', 'services', 'previews', 'domains', 'settings'].includes(
+    view.value,
+  ),
 )
 const pageDescription = computed(
   () =>
@@ -66,6 +75,8 @@ const pageDescription = computed(
       dashboard: 'Your applications and the latest release activity.',
       apps: 'Manage repositories, domains, and releases.',
       activity: 'Track release progress and deployment history.',
+      profile: 'Your owner account.',
+      personal: 'Account security and personal preferences.',
       runtimes: 'Application runtimes, package managers, and their versions.',
       resources: 'Server capacity and per-service resource consumption.',
       services: 'Manage native applications running under systemd.',
@@ -184,7 +195,15 @@ async function signIn() {
       body: body('sessions', { email: email.value.trim(), password: password.value }),
     })
     password.value = ''
+    const session = await request<{ user?: ConsoleData['user'] }>('/session')
     authenticated.value = true
+    route.meta.consoleData = {
+      authenticated: true,
+      user: session.user,
+      apps: apps.value,
+      deployments: deployments.value,
+      error: '',
+    }
     await poll()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Could not sign in.'
@@ -461,9 +480,7 @@ provide(applicationFormKey, {
           <UiIcon name="server" /><span>{{ serverHostname }}</span
           ><span aria-hidden="true">/</span><strong>{{ pageTitle }}</strong>
         </div>
-        <UiButton v-if="authenticated" aria-label="Sign out" :disabled="busy" @click="signOut"
-          ><UiIcon name="logout" /><span>Sign out</span></UiButton
-        >
+        <AccountMenu :user="route.meta.consoleData?.user" :busy="busy" @sign-out="signOut" />
       </header>
       <main id="main" class="workspace-main">
         <div class="workspace-heading">
@@ -490,7 +507,9 @@ provide(applicationFormKey, {
             </p>
           </div>
           <UiButton
-            v-if="authenticated && !planned && !applicationPage && !deploymentPage"
+            v-if="
+              authenticated && !planned && view !== 'profile' && !applicationPage && !deploymentPage
+            "
             class="primary"
             :disabled="busy"
             @click="openForm()"
@@ -529,6 +548,7 @@ provide(applicationFormKey, {
             :deployment="route.meta.deploymentData"
             :app="route.meta.applicationData"
           />
+          <ProfileDetails v-else-if="view === 'profile'" :user="route.meta.consoleData?.user" />
           <PlannedPage v-else-if="planned" :area="view" />
           <section
             v-else

@@ -100,12 +100,18 @@ pub async fn logout(ExtractState(state): ExtractState<State>) -> (HeaderMap, Sta
     (headers, StatusCode::NO_CONTENT)
 }
 
-pub async fn session() -> ApiDocument {
-    jsonapi::one(jsonapi::resource(
+pub async fn session(ExtractState(state): ExtractState<State>) -> Result<ApiDocument, ApiError> {
+    let user = state
+        .store
+        .root_account()
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError(StatusCode::UNAUTHORIZED, "Sign in to continue".into()))?;
+    Ok(jsonapi::one(jsonapi::resource(
         "sessions",
         "current",
-        json!({"authenticated":true}),
-    ))
+        json!({"authenticated":true, "user":{"id":user.id,"name":user.name,"email":user.email}}),
+    )))
 }
 
 pub async fn apps(ExtractState(state): ExtractState<State>) -> Result<ApiDocument, ApiError> {

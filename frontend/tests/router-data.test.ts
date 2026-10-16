@@ -39,7 +39,12 @@ it('waits for both inventories and passes cancellation to every request', async 
   const fetch = vi
     .fn()
     .mockResolvedValueOnce(response({ required: false }))
-    .mockResolvedValueOnce(response({ authenticated: true }))
+    .mockResolvedValueOnce(
+      response({
+        authenticated: true,
+        user: { id: 1, name: 'Zoë Masinde', email: 'root@example.com' },
+      }),
+    )
     .mockResolvedValueOnce(
       new Response(
         JSON.stringify({ data: [{ type: 'apps', id: '7', attributes: { domain: 'site.test' } }] }),
@@ -58,6 +63,7 @@ it('waits for both inventories and passes cancellation to every request', async 
   releaseDeployments(new Response(JSON.stringify({ data: [] })))
   expect(await pending).toMatchObject({
     authenticated: true,
+    user: { id: 1, name: 'Zoë Masinde', email: 'root@example.com' },
     apps: [{ id: 7, domain: 'site.test' }],
     deployments: [],
     error: '',

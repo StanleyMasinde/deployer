@@ -3,6 +3,21 @@ import { computed } from 'vue'
 import UiIcon from './ui/UiIcon.vue'
 const props = defineProps<{ area: string }>()
 const pages = {
+  personal: {
+    icon: 'settings',
+    heading: 'Your account. Your preferences.',
+    description:
+      'Personal settings for the instance owner. Theme currently follows your system preference automatically.',
+    features: [
+      ['Account security', 'Manage your password and review account access.'],
+      [
+        'Personal preferences',
+        'Control optional account preferences while respecting system accessibility settings.',
+      ],
+      ['Profile', 'Keep your account details up to date.'],
+    ],
+  },
+
   runtimes: {
     icon: 'branch',
     heading: 'The tools your applications need.',

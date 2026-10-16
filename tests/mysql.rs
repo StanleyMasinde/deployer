@@ -424,6 +424,8 @@ async fn check_http(store: Store, database_url: &str) {
         .unwrap()
         .to_owned();
 
+    check_session_metadata(&app, &cookie).await;
+
     let response = app
         .clone()
         .oneshot(
@@ -1089,4 +1091,49 @@ async fn check_deployment_resources(router: &axum::Router, store: &Store, cookie
             .await
             .unwrap();
     }
+}
+
+async fn check_session_metadata(router: &axum::Router, cookie: &str) {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    let unauthorized = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let document: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(document["data"]["type"], "sessions");
+    assert_eq!(document["data"]["id"], "current");
+    let attributes = &document["data"]["attributes"];
+    assert_eq!(attributes["authenticated"], true);
+    assert_eq!(attributes.as_object().unwrap().len(), 2);
+    assert_eq!(
+        attributes["user"],
+        serde_json::json!({
+            "id": 1, "name": "Zoë Masinde", "email": "root@example.com"
+        })
+    );
 }

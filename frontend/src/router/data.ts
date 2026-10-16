@@ -1,6 +1,7 @@
 import { ApiError, request, type App, type Deployment } from '../api/client'
 export type ConsoleData = {
   authenticated: boolean
+  user?: { id: number; name: string; email: string }
   apps: App[]
   deployments: Deployment[]
   error: string
@@ -10,7 +11,8 @@ export async function loadConsoleData(signal: AbortSignal): Promise<ConsoleData 
   try {
     const setup = await request<{ required: boolean }>('/setup', { signal })
     if (setup.required) return 'setup'
-    await request('/session', { signal })
+    const session = await request<{ user?: ConsoleData['user'] }>('/session', { signal })
+    data.user = session.user
     data.authenticated = true
     ;[data.apps, data.deployments] = await Promise.all([
       request<App[]>('/apps', { signal }),
