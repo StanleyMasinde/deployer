@@ -5,6 +5,7 @@ mod deployments;
 mod jobs;
 mod mappings;
 pub mod models;
+mod password_resets;
 mod users;
 
 #[derive(Clone)]

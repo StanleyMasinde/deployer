@@ -3,6 +3,7 @@ mod events;
 pub mod frontend;
 mod handlers;
 pub mod jsonapi;
+mod password_resets;
 
 use crate::{
     config::Config,
@@ -74,6 +75,11 @@ pub fn router(state: State) -> Router {
             get(handlers::setup_status).post(handlers::setup_root),
         )
         .route("/api/session", post(handlers::login))
+        .route("/api/password-resets", post(password_resets::request_reset))
+        .route(
+            "/api/password-resets/current",
+            axum::routing::patch(password_resets::confirm_reset),
+        )
         .route("/api/webhooks/github", post(handlers::webhook))
         .route(
             "/health",

@@ -1390,3 +1390,20 @@
 .auth-form .field-error {
   color: var(--color-error);
 }
+
+.auth-secondary-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin-top: var(--space-control);
+  font-size: var(--text-control);
+  text-decoration: none;
+}
+.auth-result p {
+  font-size: var(--text-control);
+  color: var(--color-muted);
+}
+.auth-result h2 {
+  font-size: 20px;
+}

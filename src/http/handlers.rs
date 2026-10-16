@@ -56,6 +56,10 @@ pub async fn login(
             )
         })?;
     let email_matches = root.email.eq_ignore_ascii_case(input.email.trim());
+    let session_key = crate::application::sessions::credential_key(
+        &state.config.server.session_secret,
+        &root.password_hash,
+    );
     let hash = root.password_hash;
     let valid = crate::application::sessions::verify_password(input.password, hash)
         .await
@@ -70,10 +74,7 @@ pub async fn login(
         ));
     }
 
-    let token = crate::application::sessions::issue(
-        &state.config.server.session_secret,
-        crate::now() + 86400,
-    );
+    let token = crate::application::sessions::issue(&session_key, crate::now() + 86400);
     let mut headers = HeaderMap::new();
     headers.insert(
         header::SET_COOKIE,
@@ -388,10 +389,22 @@ pub async fn setup_root(
         .await
         .map_err(|error| ApiError(StatusCode::BAD_REQUEST, error.to_string()))?;
 
-    let token = crate::application::sessions::issue(
+    let root = state
+        .store
+        .root_account()
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| {
+            ApiError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Root account missing".into(),
+            )
+        })?;
+    let session_key = crate::application::sessions::credential_key(
         &state.config.server.session_secret,
-        crate::now() + 86400,
+        &root.password_hash,
     );
+    let token = crate::application::sessions::issue(&session_key, crate::now() + 86400);
     let mut headers = HeaderMap::new();
     headers.insert(
         header::SET_COOKIE,

@@ -499,6 +499,8 @@ async fn check_http(store: Store, database_url: &str) {
     )
     .await;
 
+    check_password_reset(&app, &cleanup_store, &cookie, &config).await;
+
     toasty::sql::statement("DELETE FROM users WHERE id = 1")
         .exec(&mut cleanup_store.database())
         .await
@@ -1825,6 +1827,400 @@ async fn check_live_events(
     drop(stream);
     toasty::sql::statement("DELETE FROM apps WHERE id = ?")
         .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+}
+
+async fn check_password_reset(
+    app: &axum::Router,
+    store: &Store,
+    cookie: &str,
+    config: &deployer::config::Config,
+) {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tokio_stream::StreamExt;
+    use tower::ServiceExt;
+    let baseline_job = deployer::storage::models::Job::all()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|job| job.id)
+        .max()
+        .unwrap_or(0);
+    let request = |method: &str, path: &str, attributes: serde_json::Value, origin: bool| {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", "application/vnd.api+json");
+        if origin {
+            builder = builder.header("origin", "http://127.0.0.1:8080");
+        }
+        builder
+            .body(Body::from(
+                serde_json::json!({"data":{"type":"password-resets","attributes":attributes}})
+                    .to_string(),
+            ))
+            .unwrap()
+    };
+    let denied = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/password-resets",
+            serde_json::json!({"email":"root@example.com"}),
+            false,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    let started = tokio::time::Instant::now();
+    let unknown = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/password-resets",
+            serde_json::json!({"email":"unknown@example.com"}),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert!(started.elapsed() >= std::time::Duration::from_secs(1));
+    assert_eq!(unknown.status(), StatusCode::ACCEPTED);
+    let unknown_body = to_bytes(unknown.into_body(), 65536).await.unwrap();
+    let known = app
+        .clone()
+        .oneshot(request(
+            "POST",
+            "/api/password-resets",
+            serde_json::json!({"email":"root@example.com"}),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(known.status(), StatusCode::ACCEPTED);
+    assert_eq!(
+        unknown_body,
+        to_bytes(known.into_body(), 65536).await.unwrap()
+    );
+    let mail_jobs = deployer::storage::models::Job::all()
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    let reset_job = mail_jobs
+        .iter()
+        .filter(|j| j.kind == "email")
+        .filter_map(|j| j.payload.as_deref())
+        .filter_map(|p| serde_json::from_str::<deployer::mail::Email>(p).ok())
+        .find(|e| e.subject == "Reset your Deployer password")
+        .expect("queued reset email");
+    let link = reset_job
+        .text
+        .lines()
+        .find(|line| line.contains("/reset-password#token="))
+        .unwrap();
+    assert!(link.starts_with("http://127.0.0.1:8080/reset-password#token="));
+    let token = link.split("#token=").nth(1).unwrap().to_owned();
+    assert_eq!(token.len(), 64);
+    let stored = deployer::storage::models::PasswordReset::filter_by_id(1_u64)
+        .first()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!stored.used);
+    assert_eq!(stored.expires_at - stored.created_at, 1800);
+    assert_ne!(stored.token_hash, token);
+    assert!(deployer::application::sessions::reset_matches(
+        &config.server.session_secret,
+        &token,
+        &stored.token_hash
+    ));
+    let before = mail_jobs.len();
+    app.clone()
+        .oneshot(request(
+            "POST",
+            "/api/password-resets",
+            serde_json::json!({"email":"root@example.com"}),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        deployer::storage::models::Job::all()
+            .exec(&mut store.database())
+            .await
+            .unwrap()
+            .len(),
+        before
+    );
+    let password = "new-password-long-enough-for-tests";
+    let attributes = serde_json::json!({"token":token,"password":password,"confirmation":password});
+    let retained = deployer::storage::models::PasswordReset::filter_by_id(1_u64)
+        .first()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(retained.token_hash, stored.token_hash);
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "PATCH",
+                "/api/password-resets/current",
+                attributes.clone(),
+                false
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+    for password in ["a".repeat(14), "🦀".repeat(14), "🦀".repeat(257)] {
+        let data =
+            serde_json::json!({"token": token, "password": password, "confirmation": password});
+        assert_eq!(
+            app.clone()
+                .oneshot(request("PATCH", "/api/password-resets/current", data, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+    }
+    let mut mismatch = attributes.clone();
+    mismatch["confirmation"] = serde_json::json!("does not match");
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "PATCH",
+                "/api/password-resets/current",
+                mismatch,
+                true
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    deployer::storage::models::PasswordReset::filter_by_id(1_u64)
+        .update()
+        .expires_at(deployer::now() - 1)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "PATCH",
+                "/api/password-resets/current",
+                attributes.clone(),
+                true
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    deployer::storage::models::PasswordReset::filter_by_id(1_u64)
+        .update()
+        .expires_at(stored.expires_at)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    let mut bad = attributes.clone();
+    bad["token"] = serde_json::json!("b".repeat(64));
+    let response = app
+        .clone()
+        .oneshot(request("PATCH", "/api/password-resets/current", bad, true))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let live = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/events")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(live.status(), StatusCode::OK);
+    let mut stream = live.into_body().into_data_stream();
+    tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let response = app
+        .clone()
+        .oneshot(request(
+            "PATCH",
+            "/api/password-resets/current",
+            attributes.clone(),
+            true,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let consumed = deployer::storage::models::PasswordReset::filter_by_id(1_u64)
+        .first()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(consumed.used);
+    assert!(consumed.token_hash.is_empty());
+    assert!(
+        response.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .contains("SameSite=Strict")
+    );
+    assert!(
+        response.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .contains("Max-Age=0")
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(request(
+                "PATCH",
+                "/api/password-resets/current",
+                attributes,
+                true
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let old_session = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/session")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(old_session.status(), StatusCode::UNAUTHORIZED);
+    let login = app.clone().oneshot(Request::builder().method("POST").uri("/api/session")
+        .header("origin", "http://127.0.0.1:8080").header("content-type", "application/vnd.api+json")
+        .body(Body::from(serde_json::json!({"data":{"type":"sessions","attributes":{"email":"root@example.com","password":password}}}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let new_cookie = login.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap();
+    assert_eq!(
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/session")
+                    .header("cookie", new_cookie)
+                    .body(Body::empty())
+                    .unwrap()
+            )
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let notifications = deployer::storage::models::Job::all()
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    assert!(
+        notifications
+            .iter()
+            .filter_map(|job| job.payload.as_deref())
+            .filter_map(|payload| serde_json::from_str::<deployer::mail::Email>(payload).ok())
+            .any(|mail| mail.subject == "Your Deployer password was changed")
+    );
+    let user = store.root_account().await.unwrap().unwrap();
+    assert!(
+        deployer::application::sessions::verify_password(
+            password.into(),
+            user.password_hash.clone()
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        !deployer::application::sessions::verify_password(
+            "test-password-long-enough".into(),
+            user.password_hash.clone()
+        )
+        .await
+        .unwrap()
+    );
+    let notification = deployer::mail::SystemEmail::PasswordChanged {
+        name: &user.name,
+        link: &config.server.public_url,
+    }
+    .render(&user.email)
+    .unwrap();
+    let now = deployer::now() + 61;
+    let second = "c".repeat(64);
+    assert!(
+        store
+            .request_password_reset(
+                &user.email,
+                &config.server.session_secret,
+                &second,
+                Some(&notification),
+                now
+            )
+            .await
+            .unwrap()
+    );
+    assert!(
+        !store
+            .password_reset_valid(&config.server.session_secret, &second, now + 1800)
+            .await
+            .unwrap()
+    );
+    let (left, right) = tokio::join!(
+        store.consume_password_reset(
+            &config.server.session_secret,
+            &second,
+            &user.password_hash,
+            &notification,
+            now
+        ),
+        store.consume_password_reset(
+            &config.server.session_secret,
+            &second,
+            &user.password_hash,
+            &notification,
+            now
+        )
+    );
+    assert_ne!(
+        left.unwrap(),
+        right.unwrap(),
+        "only one concurrent reset may consume a token"
+    );
+    toasty::sql::statement("DELETE FROM jobs WHERE kind = 'email' AND id > ?")
+        .bind(baseline_job)
         .exec(&mut store.database())
         .await
         .unwrap();

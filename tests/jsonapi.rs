@@ -83,3 +83,41 @@ fn sessions_expire_and_reject_tampering() {
 }
 
 extern crate jsonapi as jsonapi_crate;
+
+#[test]
+fn password_changes_revoke_credential_bound_sessions() {
+    let key = auth::credential_key("instance secret", "old password hash");
+    let token = auth::issue(&key, 1100);
+    assert!(auth::valid(&key, &token, 1000));
+    assert!(!auth::valid(
+        &auth::credential_key("instance secret", "new password hash"),
+        &token,
+        1000
+    ));
+    assert!(!auth::valid(
+        &auth::credential_key("different secret", "old password hash"),
+        &token,
+        1000
+    ));
+    let legacy = auth::issue("instance secret", 1100);
+    assert!(!auth::valid(&key, &legacy, 1000));
+}
+
+#[test]
+fn reset_digests_reject_tampering_and_other_instance_secrets() {
+    let token = "a".repeat(64);
+    let digest = auth::reset_digest("instance secret", &token);
+    assert_ne!(digest, token);
+    assert!(auth::reset_matches("instance secret", &token, &digest));
+    assert!(!auth::reset_matches("different secret", &token, &digest));
+    assert!(!auth::reset_matches(
+        "instance secret",
+        &"b".repeat(64),
+        &digest
+    ));
+    assert!(!auth::reset_matches(
+        "instance secret",
+        &token,
+        "invalid hex"
+    ));
+}

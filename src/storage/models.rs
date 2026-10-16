@@ -82,3 +82,13 @@ pub struct Job {
     pub created_at: i64,
     pub finished_at: Option<i64>,
 }
+
+#[derive(toasty::Model)]
+pub struct PasswordReset {
+    #[key]
+    pub id: u64,
+    pub token_hash: String,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub used: bool,
+}

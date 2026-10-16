@@ -17,8 +17,8 @@ export const setupSchema = z
     email,
     password: z
       .string()
-      .min(12, 'Use at least 12 characters.')
-      .max(1024, 'Use at most 1024 characters.'),
+      .refine((v) => [...v].length >= 15, 'Use at least 15 characters.')
+      .refine((v) => new TextEncoder().encode(v).length <= 1024, 'Use at most 1024 bytes.'),
     confirmation: z.string(),
   })
   .refine((v) => v.password === v.confirmation, {
@@ -106,3 +106,18 @@ export function useValidation() {
   }
   return { errors, validate }
 }
+
+export const forgotPasswordSchema = z.object({ email })
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().regex(/^[a-f0-9]{64}$/i, 'This reset link is invalid. Request a new one.'),
+    password: z
+      .string()
+      .refine((v) => [...v].length >= 15, 'Use at least 15 characters.')
+      .refine((v) => new TextEncoder().encode(v).length <= 1024, 'Use at most 1024 bytes.'),
+    confirmation: z.string(),
+  })
+  .refine((v) => v.password === v.confirmation, {
+    path: ['confirmation'],
+    message: 'Passwords do not match.',
+  })

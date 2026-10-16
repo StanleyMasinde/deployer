@@ -32,11 +32,12 @@ pub async fn stream(
             let changed = state.store.changes.notified();
             tokio::pin!(changed);
             changed.as_mut().enable();
-            if !crate::application::sessions::valid(
-                &state.config.server.session_secret,
-                &token,
-                crate::now(),
-            ) {
+            if !state
+                .store
+                .valid_session(&state.config.server.session_secret, &token, crate::now())
+                .await
+                .unwrap_or(false)
+            {
                 break;
             }
             let snapshot = match tokio::try_join!(state.store.apps(), state.store.deployments()) {

@@ -26,7 +26,7 @@ onMounted(() => {
   <ConfigProvider :scroll-body="scrollBody">
     <NavigationProgress />
     <a class="skip-link" href="#main">Skip to content</a>
-    <header v-if="!route.path.startsWith('/console') && route.path !== '/setup'" class="masthead">
+    <header v-if="!route.path.startsWith('/console') && !route.meta.auth" class="masthead">
       <RouterLink class="wordmark" to="/" aria-label="Deployer home">
         <BrandMark /> Deployer
       </RouterLink>
@@ -35,7 +35,7 @@ onMounted(() => {
       </nav>
     </header>
     <RouterView />
-    <footer v-if="!route.path.startsWith('/console') && route.path !== '/setup'" class="footer">
+    <footer v-if="!route.path.startsWith('/console') && !route.meta.auth" class="footer">
       <span>Your server. Your apps.</span><span>Static apps · GitHub Actions · Nginx</span>
     </footer>
   </ConfigProvider>

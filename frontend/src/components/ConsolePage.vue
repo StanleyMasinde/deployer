@@ -496,6 +496,7 @@ provide(applicationFormKey, {
       /><UiButton type="submit" class="primary" :disabled="busy"
         >{{ busy ? 'Signing in…' : 'Sign in' }}<UiIcon name="arrow"
       /></UiButton>
+      <RouterLink class="auth-secondary-link" to="/forgot-password">Forgot password?</RouterLink>
     </form>
   </AuthLayout>
   <div v-else class="deployment-console console-app">

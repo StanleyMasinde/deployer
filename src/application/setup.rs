@@ -91,8 +91,8 @@ impl Setup {
         );
 
         ensure!(
-            (12..=1024).contains(&password.len()),
-            "password must contain 12–1024 bytes"
+            password.chars().count() >= 15 && password.len() <= 1024,
+            "password must contain at least 15 characters and at most 1024 bytes"
         );
         ensure!(code.len() == 64, "invalid setup code");
 

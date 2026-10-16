@@ -118,3 +118,20 @@ DNS. The helper tests simulate the ACME client without requesting public certifi
 ## Contributing
 
 See [Contributing](Contributing.md) to run Deployer locally and check your changes.
+
+## Recover your password
+
+Configure SMTP and keep the worker running to deliver password-reset email. Use
+**Forgot password?** on the sign-in page. Deployer returns the same response for
+recognized and unrecognized addresses. It sends at most one reset email per
+account per minute.
+
+Reset links expire after 30 minutes and work once. Production links require the
+configured HTTPS control-panel URL; localhost HTTP is allowed in debug builds.
+The token stays in the URL fragment, so browsers do not send it in HTTP request
+URLs. A successful reset invalidates existing sessions, queues a notification
+email, and requires you to sign in again. New passwords require at least 15
+characters and at most 1024 UTF-8 bytes.
+
+This release binds sessions to the account's password hash. Existing sessions
+issued by earlier releases must sign in again after upgrading.
