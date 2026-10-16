@@ -45,13 +45,37 @@ impl Store {
 
 impl Store {
     pub async fn app_deployments(&self, app_id: u64) -> anyhow::Result<Vec<DeploymentInfo>> {
-        Ok(Deployment::filter_by_app_id(app_id)
-            .order_by(Deployment::fields().id().desc())
-            .limit(100)
+        self.app_deployments_before(app_id, None).await
+    }
+
+    pub async fn app_deployments_before(
+        &self,
+        app_id: u64,
+        before: Option<u64>,
+    ) -> anyhow::Result<Vec<DeploymentInfo>> {
+        let fields = Deployment::fields();
+        Ok(Deployment::filter(
+            fields
+                .app_id()
+                .eq(app_id)
+                .and(fields.id().lt(before.unwrap_or(u64::MAX))),
+        )
+        .order_by(Deployment::fields().id().desc())
+        .limit(100)
+        .exec(&mut self.db.clone())
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect())
+    }
+}
+
+impl Store {
+    pub async fn deployment_optional(&self, id: u64) -> anyhow::Result<Option<DeploymentInfo>> {
+        Ok(Deployment::filter_by_id(id)
+            .first()
             .exec(&mut self.db.clone())
             .await?
-            .into_iter()
-            .map(Into::into)
-            .collect())
+            .map(Into::into))
     }
 }

@@ -3,7 +3,7 @@ use super::{ApiError, State};
 use crate::providers::SourceProvider;
 use axum::{
     Json,
-    extract::{Path, State as ExtractState},
+    extract::{Path, Query, State as ExtractState},
     http::{HeaderMap, StatusCode, header},
 };
 use serde::Deserialize;
@@ -180,14 +180,20 @@ pub async fn delete_app(
     Ok(StatusCode::ACCEPTED)
 }
 
+#[derive(Deserialize)]
+pub struct DeploymentCursor {
+    before: Option<u64>,
+}
+
 pub async fn app_deployments(
     ExtractState(state): ExtractState<State>,
     Path(id): Path<u64>,
+    Query(cursor): Query<DeploymentCursor>,
 ) -> Result<ApiDocument, ApiError> {
     state.store.find_app(id).await.map_err(app_error)?;
     let rows = state
         .store
-        .app_deployments(id)
+        .app_deployments_before(id, cursor.before)
         .await
         .map_err(ApiError::internal)?;
     Ok(jsonapi::many(
@@ -377,4 +383,21 @@ pub async fn enable_https(
 ) -> Result<ApiDocument, ApiError> {
     let app = state.store.request_https(id).await.map_err(app_error)?;
     Ok(jsonapi::one(jsonapi::resource("apps", app.id, app)))
+}
+
+pub async fn deployment(
+    ExtractState(state): ExtractState<State>,
+    Path(id): Path<u64>,
+) -> Result<ApiDocument, ApiError> {
+    let deployment = state
+        .store
+        .deployment_optional(id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError(StatusCode::NOT_FOUND, "Deployment not found".into()))?;
+    Ok(jsonapi::one(jsonapi::resource(
+        "deployments",
+        deployment.id,
+        &deployment,
+    )))
 }

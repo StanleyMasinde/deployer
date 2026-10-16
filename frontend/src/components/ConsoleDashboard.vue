@@ -73,7 +73,7 @@ const label = (status: string) =>
               ><UiIcon :name="deployment.status === 'live' ? 'check' : 'activity'"
             /></span>
             <div>
-              <RouterLink class="release-link" to="/console/deployments"
+              <RouterLink class="release-link" :to="`/console/deployments/${deployment.id}`"
                 ><strong>{{ name(deployment.appId) }}</strong></RouterLink
               >
               <p>

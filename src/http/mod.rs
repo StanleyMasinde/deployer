@@ -60,6 +60,7 @@ pub fn router(state: State) -> Router {
         .route("/api/apps/{id}/workflow", post(handlers::workflow))
         .route("/api/apps/{id}/https", post(handlers::enable_https))
         .route("/api/deployments", get(handlers::deployments))
+        .route("/api/deployments/{id}", get(handlers::deployment))
         .route("/api/repositories", get(handlers::repositories))
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

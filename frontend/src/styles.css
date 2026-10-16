@@ -637,3 +637,44 @@ input[aria-invalid='true'],
 .console-brand > .brand-mark {
   margin-right: var(--space-xs);
 }
+
+.navigation-progress {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 3px;
+  z-index: 100;
+  overflow: clip;
+  pointer-events: none;
+  background: var(--color-tint);
+}
+.navigation-progress > span {
+  display: block;
+  height: 100%;
+  width: 35%;
+  background: var(--color-accent);
+  animation: navigation-loading 1.1s ease-in-out infinite;
+}
+@keyframes navigation-loading {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(390%);
+  }
+}
+.sr-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: clip;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .navigation-progress > span {
+    animation: none;
+    width: 100%;
+  }
+}

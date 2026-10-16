@@ -478,6 +478,7 @@ async fn check_http(store: Store, database_url: &str) {
         "Zoë Masinde"
     );
     check_mail_queue(&cleanup_store, current_provider.as_ref(), &config.worker).await;
+    check_deployment_resources(&app, &cleanup_store, &cookie).await;
     check_app_crud(
         &app,
         &cleanup_store,
@@ -938,6 +939,152 @@ async fn check_app_crud(
     for id in [other.id] {
         toasty::sql::statement("DELETE FROM apps WHERE id = ?")
             .bind(id)
+            .exec(&mut store.database())
+            .await
+            .unwrap();
+    }
+}
+
+async fn check_deployment_resources(router: &axum::Router, store: &Store, cookie: &str) {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    let nonce = rand::random::<u32>();
+    let mut apps = Vec::new();
+    for suffix in ["history", "other"] {
+        let app = store
+            .create_app(
+                "github",
+                &NewApp {
+                    repository: format!("test/{suffix}-{nonce}"),
+                    branch: "main".into(),
+                    domain: format!("{suffix}-{nonce}.example.com"),
+                    build_config: Default::default(),
+                    install_command: String::new(),
+                    build_command: String::new(),
+                    output_directory: ".".into(),
+                    spa: false,
+                },
+            )
+            .await
+            .unwrap();
+        apps.push(app);
+    }
+    let mut ids = Vec::new();
+    for index in 0..104_u64 {
+        let app_id = apps[usize::from(index == 103)].id;
+        let deployment = deployer::storage::models::Deployment::create()
+            .event_key(format!("resource-test-{nonce}-{index}"))
+            .app_id(app_id)
+            .run_id(index + 1)
+            .attempt(1_u32)
+            .commit_sha("a".repeat(40))
+            .status("live")
+            .created_at(deployer::now())
+            .exec(&mut store.database())
+            .await
+            .unwrap();
+        if index < 103 {
+            ids.push(deployment.id);
+        }
+    }
+    ids.reverse();
+    let request = |uri: &str, authenticated: bool| {
+        let mut builder = Request::builder().uri(uri);
+        if authenticated {
+            builder = builder.header("cookie", cookie);
+        }
+        builder.body(Body::empty()).unwrap()
+    };
+    let uri = format!("/api/apps/{}/deployments", apps[0].id);
+    let first = router.clone().oneshot(request(&uri, true)).await.unwrap();
+    assert_eq!(first.status(), StatusCode::OK);
+    let first: serde_json::Value =
+        serde_json::from_slice(&to_bytes(first.into_body(), 1_000_000).await.unwrap()).unwrap();
+    let first_ids: Vec<u64> = first["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["id"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(first_ids, ids[..100]);
+    let second = router
+        .clone()
+        .oneshot(request(&format!("{uri}?before={}", first_ids[99]), true))
+        .await
+        .unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let second: serde_json::Value =
+        serde_json::from_slice(&to_bytes(second.into_body(), 65536).await.unwrap()).unwrap();
+    let second_ids: Vec<u64> = second["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["id"].as_str().unwrap().parse().unwrap())
+        .collect();
+    assert_eq!(second_ids, ids[100..]);
+    let empty = store
+        .app_deployments_before(apps[0].id, Some(*ids.last().unwrap()))
+        .await
+        .unwrap();
+    assert!(empty.is_empty());
+    let detail = format!("/api/deployments/{}", ids[0]);
+    let response = router
+        .clone()
+        .oneshot(request(&detail, true))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let json: serde_json::Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(json["data"]["id"], ids[0].to_string());
+    assert_eq!(json["data"]["attributes"]["appId"], apps[0].id);
+    assert_eq!(json["data"]["attributes"]["commitSha"], "a".repeat(40));
+    for path in [&uri, &detail] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(path, false))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    for path in [
+        "/api/deployments/18446744073709551615".to_owned(),
+        "/api/apps/18446744073709551615/deployments".to_owned(),
+    ] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&path, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+    }
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&format!("{uri}?before=invalid"), true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    for app in apps {
+        toasty::sql::statement("DELETE FROM deployments WHERE app_id = ?")
+            .bind(app.id)
+            .exec(&mut store.database())
+            .await
+            .unwrap();
+        toasty::sql::statement("DELETE FROM apps WHERE id = ?")
+            .bind(app.id)
             .exec(&mut store.database())
             .await
             .unwrap();

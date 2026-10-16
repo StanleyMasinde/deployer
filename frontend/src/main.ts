@@ -10,6 +10,10 @@ import './styles.css'
 
 export const createApp = ViteSSG(
   App,
-  { routes, scrollBehavior: () => ({ top: 0 }) },
+  {
+    routes,
+    scrollBehavior: (to, from, saved) =>
+      to.path === from.path || to.meta.modal || from.meta.modal ? false : (saved ?? { top: 0 }),
+  },
   ({ router }) => registerRouter(router),
 )

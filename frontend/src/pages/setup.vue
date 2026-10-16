@@ -1,33 +1,21 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { Label } from 'reka-ui'
 import { setupSchema, useValidation } from '../validation'
 import AuthLayout from '../components/AuthLayout.vue'
 import UiInput from '../components/ui/UiInput.vue'
 import UiButton from '../components/ui/UiButton.vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { body, request } from '../api/client'
 
-definePage({ meta: { ssg: false, title: 'Create your root account · Deployer' } })
+definePage({ meta: { auth: true, ssg: false, title: 'Create your root account · Deployer' } })
 
 const router = useRouter()
 const form = reactive({ code: '', name: '', email: '', password: '', confirmation: '' })
-const checking = ref(true)
+const checking = ref(false)
 const busy = ref(false)
-const error = ref('')
+const error = ref(useRoute().meta.setupError ?? '')
 const { errors: fieldErrors, validate } = useValidation()
-
-onMounted(async () => {
-  try {
-    const setup = await request<{ required: boolean }>('/setup')
-
-    if (!setup.required) await router.replace('/console')
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : 'Could not check setup status.'
-  } finally {
-    checking.value = false
-  }
-})
 
 async function createRoot() {
   error.value = ''
@@ -63,7 +51,7 @@ async function createRoot() {
     title="Create your root account"
     description="Set up the account that will manage this instance."
   >
-    <p v-if="checking" role="status">Checking your instance…</p>
+    <p v-if="checking" role="status">Checking setup…</p>
     <form novalidate v-else class="auth-form" @submit.prevent="createRoot">
       <p>Read the one-time setup code on your VPS:</p>
       <pre class="setup-command"><code>sudo cat /var/lib/deployer/state/setup-code</code></pre>
