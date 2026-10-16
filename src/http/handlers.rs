@@ -270,6 +270,21 @@ pub async fn webhook(
         .map_err(|_| ApiError(StatusCode::UNAUTHORIZED, "Invalid webhook signature".into()))?;
     match headers.get("x-github-event").and_then(|h| h.to_str().ok()) {
         Some("ping") => return Ok(StatusCode::OK),
+        Some("pull_request") => {
+            if let Some(update) =
+                crate::providers::github::webhook::parse_pull_request(&body, github.installation_id)
+                    .map_err(|_| {
+                        ApiError(StatusCode::BAD_REQUEST, "Invalid pull request event".into())
+                    })?
+            {
+                state
+                    .store
+                    .update_workflow_pr(&update)
+                    .await
+                    .map_err(ApiError::internal)?;
+            }
+            return Ok(StatusCode::ACCEPTED);
+        }
         Some("workflow_run") => {}
         _ => return Ok(StatusCode::NO_CONTENT),
     }

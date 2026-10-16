@@ -481,6 +481,7 @@ async fn check_http(store: Store, database_url: &str) {
     );
     check_mail_queue(&cleanup_store, current_provider.as_ref(), &config.worker).await;
     check_deployment_resources(&app, &cleanup_store, &cookie).await;
+    check_workflow_pr_updates(&app, &cleanup_store, config.providers.github().unwrap()).await;
     check_app_crud(
         &app,
         &cleanup_store,
@@ -819,6 +820,7 @@ async fn check_app_crud(
     );
     assert!(saved.spa);
     assert!(saved.workflow_pr.is_some());
+    assert_eq!(saved.workflow_pr_state.as_deref(), Some("open"));
     input.build_command = "npm run build -- --base=/".into();
     assert_eq!(
         router
@@ -835,6 +837,14 @@ async fn check_app_crud(
             .await
             .unwrap()
             .workflow_pr
+            .is_none()
+    );
+    assert!(
+        store
+            .find_app(record.id)
+            .await
+            .unwrap()
+            .workflow_pr_state
             .is_none()
     );
     for _ in 0..2 {
@@ -1136,4 +1146,235 @@ async fn check_session_metadata(router: &axum::Router, cookie: &str) {
             "id": 1, "name": "Zoë Masinde", "email": "root@example.com"
         })
     );
+}
+
+async fn check_workflow_pr_updates(
+    router: &axum::Router,
+    store: &Store,
+    github: &deployer::config::Github,
+) {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+    use tower::ServiceExt;
+
+    let nonce = rand::random::<u32>();
+    let app = store
+        .create_app(
+            "github",
+            &NewApp {
+                repository: format!("events/repo-{nonce}"),
+                branch: "main".into(),
+                domain: format!("events-{nonce}.example.com"),
+                build_config: Default::default(),
+                install_command: String::new(),
+                build_command: String::new(),
+                output_directory: ".".into(),
+                spa: false,
+            },
+        )
+        .await
+        .unwrap();
+    let url = format!("https://github.com/{}/pull/1", app.repository);
+    assert!(app.workflow_pr_state.is_none());
+    store.set_pr(app.id, &url).await.unwrap();
+    assert_eq!(
+        store
+            .app(app.id)
+            .await
+            .unwrap()
+            .workflow_pr_state
+            .as_deref(),
+        Some("open")
+    );
+    let event = |action: &str, state: &str, merged: bool, timestamp: &str| {
+        serde_json::json!({
+            "action": action, "installation": { "id": github.installation_id },
+            "repository": { "full_name": app.repository.to_uppercase() },
+            "pull_request": { "html_url": url, "state": state, "merged": merged, "updated_at": timestamp }
+        })
+    };
+    let request = |event: &serde_json::Value, valid_signature: bool| {
+        let bytes = serde_json::to_vec(event).unwrap();
+        let mut mac = Hmac::<Sha256>::new_from_slice(github.webhook_secret.as_bytes()).unwrap();
+        mac.update(&bytes);
+        let signature = if valid_signature {
+            format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+        } else {
+            format!("sha256={}", "0".repeat(64))
+        };
+        Request::builder()
+            .method("POST")
+            .uri("/api/webhooks/github")
+            .header("x-github-event", "pull_request")
+            .header("x-hub-signature-256", signature)
+            .header("content-type", "application/json")
+            .body(Body::from(bytes))
+            .unwrap()
+    };
+    let closed = event("closed", "closed", false, "2026-10-16T09:00:00Z");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&closed, false))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let mut wrong_installation = closed.clone();
+    wrong_installation["installation"]["id"] = serde_json::json!(github.installation_id + 1);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&wrong_installation, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        store
+            .app(app.id)
+            .await
+            .unwrap()
+            .workflow_pr_state
+            .as_deref(),
+        Some("open")
+    );
+    let mut unrelated = closed.clone();
+    unrelated["pull_request"]["html_url"] =
+        serde_json::json!(format!("https://github.com/{}/pull/99", app.repository));
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&unrelated, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    unrelated = closed.clone();
+    unrelated["repository"]["full_name"] = serde_json::json!("unrelated/repository");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&unrelated, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        store
+            .app(app.id)
+            .await
+            .unwrap()
+            .workflow_pr_state
+            .as_deref(),
+        Some("open")
+    );
+    for (payload, expected) in [
+        (closed, "closed"),
+        (
+            event("reopened", "open", false, "2026-10-16T10:00:00Z"),
+            "open",
+        ),
+        (
+            event("closed", "closed", false, "2026-10-16T08:00:00Z"),
+            "open",
+        ),
+        (
+            event("closed", "closed", true, "2026-10-16T11:00:00Z"),
+            "merged",
+        ),
+        (
+            event("closed", "closed", true, "2026-10-16T11:00:00Z"),
+            "merged",
+        ),
+        (
+            event("reopened", "open", false, "2026-10-16T12:00:00Z"),
+            "merged",
+        ),
+    ] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&payload, true))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(
+            store
+                .app(app.id)
+                .await
+                .unwrap()
+                .workflow_pr_state
+                .as_deref(),
+            Some(expected)
+        );
+    }
+    let new_url = format!("https://github.com/{}/pull/2", app.repository);
+    store.set_pr(app.id, &new_url).await.unwrap();
+    let row = deployer::storage::models::App::filter_by_id(app.id)
+        .first()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(row.workflow_pr_updated_at.is_none());
+    let old_pr = event("closed", "closed", true, "2026-10-16T13:00:00Z");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&old_pr, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        store
+            .app(app.id)
+            .await
+            .unwrap()
+            .workflow_pr_state
+            .as_deref(),
+        Some("open")
+    );
+    deployer::storage::models::App::filter_by_id(app.id)
+        .update()
+        .deleted_at(Some(deployer::now()))
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    let mut deleted = old_pr;
+    deleted["pull_request"]["html_url"] = serde_json::json!(new_url);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&deleted, true))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let row = deployer::storage::models::App::filter_by_id(app.id)
+        .first()
+        .exec(&mut store.database())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.workflow_pr_state.as_deref(), Some("open"));
+    assert!(store.app_deployments(app.id).await.unwrap().is_empty());
+    toasty::sql::statement("DELETE FROM apps WHERE id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
 }

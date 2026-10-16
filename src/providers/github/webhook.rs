@@ -76,3 +76,59 @@ pub fn parse(body: &[u8], installation_id: u64) -> anyhow::Result<Option<BuildCo
         commit_sha: run.head_sha,
     }))
 }
+
+#[derive(Debug)]
+pub struct PullRequestUpdate {
+    pub repository: String,
+    pub url: String,
+    pub state: &'static str,
+    pub updated_at: String,
+}
+
+pub fn parse_pull_request(
+    body: &[u8],
+    installation_id: u64,
+) -> anyhow::Result<Option<PullRequestUpdate>> {
+    #[derive(Deserialize)]
+    struct Pull {
+        html_url: String,
+        state: String,
+        merged: bool,
+        updated_at: String,
+    }
+    #[derive(Deserialize)]
+    struct Event {
+        action: String,
+        installation: Installation,
+        repository: Repo,
+        pull_request: Pull,
+    }
+    let p: Event = serde_json::from_slice(body)?;
+    ensure!(
+        p.installation.id == installation_id,
+        "unexpected GitHub installation"
+    );
+    if !matches!(
+        p.action.as_str(),
+        "opened" | "reopened" | "closed" | "synchronize" | "edited"
+    ) {
+        return Ok(None);
+    }
+    let state = if p.action == "closed" && p.pull_request.merged {
+        "merged"
+    } else if p.pull_request.state == "closed" {
+        "closed"
+    } else {
+        "open"
+    };
+    ensure!(
+        p.pull_request.updated_at.len() == 20 && p.pull_request.updated_at.ends_with('Z'),
+        "invalid update timestamp"
+    );
+    Ok(Some(PullRequestUpdate {
+        repository: p.repository.full_name,
+        url: p.pull_request.html_url,
+        state,
+        updated_at: p.pull_request.updated_at,
+    }))
+}

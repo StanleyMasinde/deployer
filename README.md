@@ -23,8 +23,10 @@ Create the App in the GitHub account or organization that owns your repositories
      verify builds and download artifacts.
    - **Contents**, **Workflows**, and **Pull requests**: read and write, to
      create the build workflow and open its pull request.
-5. Subscribe to **Workflow run** events and create the App for **Only on this
-   account**.
+5. Subscribe to **Workflow run** and **Pull request** events, then create the App
+   for **Only on this account**. Pull request events update the workflow PR state
+   in Deployer when you merge, close, or reopen it. If you already created the App,
+   enable **Pull request** under its webhook event subscriptions.
 6. Record the **Client ID**. That is the JWT issuer. Generate a private key and
    copy the downloaded PEM file to your VPS. The installer asks for its path.
 7. Select **Install App**, install it on the repositories you want to deploy, and

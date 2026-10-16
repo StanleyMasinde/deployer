@@ -32,6 +32,8 @@ pub struct App {
     pub spa: bool,
     #[column(type = text)]
     pub workflow_pr: Option<String>,
+    pub workflow_pr_state: Option<String>,
+    pub workflow_pr_updated_at: Option<String>,
     pub deleted_at: Option<i64>,
     pub https_enabled: Option<bool>,
     #[column(type = varchar(253))]

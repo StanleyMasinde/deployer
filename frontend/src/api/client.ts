@@ -67,6 +67,7 @@ export type App = {
   domain: string
   spa: boolean
   workflowPr: string | null
+  workflowPrState?: 'open' | 'merged' | 'closed' | null
 }
 
 export type Deployment = {

@@ -803,3 +803,14 @@
     display: none;
   }
 }
+
+.workflow-state {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+  font-size: var(--text-control);
+  color: var(--color-muted);
+}
+.workflow-state[data-status='merged'] {
+  color: var(--color-success);
+}

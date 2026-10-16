@@ -652,7 +652,13 @@ provide(applicationFormKey, {
                       ><time :datetime="new Date(latest(app)!.createdAt * 1000).toISOString()">{{
                         dateLabel(latest(app)!.createdAt)
                       }}</time></span
-                    ><span v-else class="deployment-stamp">Merge your workflow PR to begin</span>
+                    ><span v-else class="deployment-stamp">{{
+                      app.workflowPrState === 'merged'
+                        ? 'Workflow merged. Waiting for a build.'
+                        : app.workflowPrState === 'closed'
+                          ? 'Workflow PR closed without merging.'
+                          : 'Merge your workflow PR to begin'
+                    }}</span>
                   </div>
                   <div class="application-action">
                     <UiButton class="details-button" @click="openDetails(app)">Details</UiButton>
@@ -662,7 +668,13 @@ provide(applicationFormKey, {
                       :href="app.workflowPr"
                       target="_blank"
                       rel="noopener noreferrer"
-                      >Workflow PR<UiIcon name="arrow" /></a
+                      >{{
+                        app.workflowPrState === 'merged'
+                          ? 'PR merged'
+                          : app.workflowPrState === 'closed'
+                            ? 'PR closed'
+                            : 'Workflow PR'
+                      }}<UiIcon name="arrow" /></a
                     ><UiButton
                       v-else
                       :disabled="busy || app.deletionRequested"

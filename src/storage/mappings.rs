@@ -23,6 +23,7 @@ impl TryFrom<models::App> for domain::App {
             output_directory: app.output_directory,
             spa: app.spa,
             workflow_pr: app.workflow_pr,
+            workflow_pr_state: app.workflow_pr_state,
             deletion_requested: app.deleted_at.is_some(),
             https: domain::Https {
                 enabled: app.https_enabled.unwrap_or(false),

@@ -246,6 +246,22 @@ async function workflow() {
           </section>
           <section class="detail-section">
             <h2>Build configuration</h2>
+            <p
+              v-if="app.workflowPr"
+              class="workflow-state"
+              :data-status="app.workflowPrState ?? 'unknown'"
+            >
+              <UiIcon :name="app.workflowPrState === 'merged' ? 'check' : 'repo'" />{{
+                app.workflowPrState === 'merged'
+                  ? 'Workflow PR merged'
+                  : app.workflowPrState === 'closed'
+                    ? 'Workflow PR closed without merging'
+                    : app.workflowPrState === 'open'
+                      ? 'Workflow PR open — awaiting merge'
+                      : 'Workflow PR status has not been received yet'
+              }}
+            </p>
+
             <dl class="detail-values">
               <div>
                 <dt>Deployment type</dt>
@@ -295,7 +311,13 @@ async function workflow() {
                 :href="app.workflowPr"
                 target="_blank"
                 rel="noopener noreferrer"
-                >Open workflow PR<UiIcon name="arrow" /></a
+                >{{
+                  app.workflowPrState === 'merged'
+                    ? 'View merged PR'
+                    : app.workflowPrState === 'closed'
+                      ? 'View closed PR'
+                      : 'Open workflow PR'
+                }}<UiIcon name="arrow" /></a
               ><UiButton :disabled="busy || app.deletionRequested" @click="workflow">{{
                 busy ? 'Working…' : 'Update workflow PR'
               }}</UiButton>
