@@ -50,3 +50,63 @@
   --radius-modal: 16px;
   --space-modal: 1.5rem;
 }
+
+:root {
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-paper: oklch(18% 0.008 55);
+    --color-surface: oklch(22% 0.009 55);
+    --color-sidebar: oklch(25% 0.01 55);
+    --color-ink: oklch(95% 0.008 75);
+    --color-body: oklch(86% 0.01 75);
+    --color-muted: oklch(73% 0.012 75);
+    --color-rule: oklch(38% 0.012 65);
+    --color-accent: oklch(77% 0.13 38);
+    --color-accent-hover: oklch(84% 0.1 38);
+    --color-accent-ink: oklch(20% 0.025 35);
+    --color-tint: oklch(28% 0.04 35);
+    --color-success: oklch(79% 0.11 155);
+    --color-success-paper: oklch(27% 0.035 155);
+    --color-warning: oklch(83% 0.11 80);
+    --color-warning-paper: oklch(28% 0.035 80);
+    --color-error: oklch(80% 0.12 25);
+    --color-error-paper: oklch(28% 0.04 25);
+    --color-overlay: oklch(8% 0.005 55 / 0.7);
+    --color-shadow: oklch(5% 0.005 55 / 0.35);
+  }
+}
+@media (prefers-contrast: more) {
+  :root {
+    --color-rule: oklch(55% 0.01 65);
+    --color-muted: oklch(34% 0.01 55);
+  }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --color-rule: oklch(67% 0.01 65);
+    --color-muted: oklch(88% 0.01 75);
+  }
+}
+@media (forced-colors: active) {
+  :root {
+    --color-paper: Canvas;
+    --color-surface: Canvas;
+    --color-sidebar: Canvas;
+    --color-ink: CanvasText;
+    --color-body: CanvasText;
+    --color-muted: CanvasText;
+    --color-rule: ButtonText;
+    --color-accent: LinkText;
+    --color-accent-hover: LinkText;
+    --color-accent-ink: Canvas;
+    --color-tint: Canvas;
+    --color-error: CanvasText;
+    --color-error-paper: Canvas;
+    --color-success: CanvasText;
+    --color-success-paper: Canvas;
+    --color-warning: CanvasText;
+    --color-warning-paper: Canvas;
+  }
+}

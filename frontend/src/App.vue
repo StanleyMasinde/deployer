@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandMark from './components/BrandMark.vue'
 import { ConfigProvider } from 'reka-ui'
 import { ref, onMounted } from 'vue'
 import UiIcon from './components/ui/UiIcon.vue'
@@ -13,16 +14,16 @@ onMounted(() => {
 <template>
   <ConfigProvider :scroll-body="scrollBody">
     <a class="skip-link" href="#main">Skip to content</a>
-    <header v-if="!['/console', '/setup'].includes(route.path)" class="masthead">
+    <header v-if="!route.path.startsWith('/console') && route.path !== '/setup'" class="masthead">
       <RouterLink class="wordmark" to="/" aria-label="Deployer home">
-        <span class="mark" aria-hidden="true">↥</span> Deployer
+        <BrandMark /> Deployer
       </RouterLink>
       <nav aria-label="Main navigation">
         <RouterLink to="/console">Console <UiIcon name="arrow" /></RouterLink>
       </nav>
     </header>
     <RouterView />
-    <footer v-if="!['/console', '/setup'].includes(route.path)" class="footer">
+    <footer v-if="!route.path.startsWith('/console') && route.path !== '/setup'" class="footer">
       <span>Your server. Your apps.</span><span>Static apps · GitHub Actions · Nginx</span>
     </footer>
   </ConfigProvider>

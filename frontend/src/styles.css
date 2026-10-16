@@ -579,3 +579,61 @@ input[aria-invalid='true'],
 .select-trigger[aria-invalid='true'] {
   border-color: var(--color-error);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .console-dialog-overlay,
+  .confirm-overlay {
+    backdrop-filter: none;
+    background: var(--color-paper);
+    opacity: 0.95;
+  }
+}
+@media (forced-colors: active) {
+  button,
+  input,
+  .select-trigger,
+  .console-modal,
+  .console-confirm {
+    border: 1px solid ButtonText;
+  }
+  a[aria-current='page'] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  :focus-visible {
+    outline: 3px solid Highlight;
+  }
+}
+@media (max-width: 47.99rem) {
+  input:not([type='checkbox']),
+  .select-trigger,
+  .deployment-console input,
+  .deployment-console .select-trigger,
+  .console-modal input,
+  .console-modal .select-trigger {
+    font-size: 16px;
+  }
+}
+.brand-mark {
+  color: var(--color-accent);
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+.console-brand > .brand-mark {
+  margin-right: var(--space-xs);
+}

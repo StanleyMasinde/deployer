@@ -13,9 +13,23 @@ import {
   ArrowPathIcon,
   CheckIcon,
   ChevronDownIcon,
+  HomeIcon,
+  GlobeAltIcon,
+  BeakerIcon,
+  Cog6ToothIcon,
+  Bars3Icon,
+  ChartBarIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 
 const icons = {
+  dashboard: HomeIcon,
+  domains: GlobeAltIcon,
+  previews: BeakerIcon,
+  settings: Cog6ToothIcon,
+  menu: Bars3Icon,
+  resources: ChartBarIcon,
+  attention: ExclamationTriangleIcon,
   apps: Squares2X2Icon,
   activity: BoltIcon,
   server: ServerStackIcon,
