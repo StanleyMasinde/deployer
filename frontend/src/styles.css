@@ -3,7 +3,7 @@
  * Nav: N9 edge-aligned minimal · footer: Ft2 inline-rule
  * Audience: VPS owners · use: connect and monitor static apps · tone: utilitarian
  */
-@import "./assets/tokens.css";
+@import './assets/tokens.css';
 
 * {
   box-sizing: border-box;
@@ -239,7 +239,7 @@ label {
   font-size: 13px;
   font-weight: 500;
 }
-input:not([type="checkbox"]),
+input:not([type='checkbox']),
 .select-trigger {
   width: 100%;
   min-width: 0;
@@ -278,7 +278,7 @@ input:not([type="checkbox"]),
   padding: 0;
   font-size: 13px;
 }
-.checkbox-control[data-state="checked"] {
+.checkbox-control[data-state='checked'] {
   background: var(--color-accent);
   border-color: var(--color-accent);
   color: var(--color-accent-ink);
@@ -372,7 +372,7 @@ input:not([type="checkbox"]),
   border-radius: var(--radius-control);
   white-space: nowrap;
 }
-.status[data-status="failed"] {
+.status[data-status='failed'] {
   color: var(--color-error);
   background: var(--color-error-paper);
 }
@@ -575,7 +575,7 @@ html {
   font-size: var(--text-small);
   margin: var(--space-xs) 0 var(--space-control);
 }
-input[aria-invalid="true"],
-.select-trigger[aria-invalid="true"] {
+input[aria-invalid='true'],
+.select-trigger[aria-invalid='true'] {
   border-color: var(--color-error);
 }

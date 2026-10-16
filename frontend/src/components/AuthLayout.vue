@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import "../console.css";
-defineProps<{ title: string; description: string }>();
+import '../console.css'
+defineProps<{ title: string; description: string }>()
 </script>
 
 <template>

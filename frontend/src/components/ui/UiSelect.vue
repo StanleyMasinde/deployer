@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import UiIcon from "./UiIcon.vue";
+import UiIcon from './UiIcon.vue'
 import {
   SelectRoot,
   SelectTrigger,
@@ -11,18 +11,18 @@ import {
   SelectItem,
   SelectItemText,
   SelectItemIndicator,
-} from "reka-ui";
-defineOptions({ inheritAttrs: false });
+} from 'reka-ui'
+defineOptions({ inheritAttrs: false })
 defineProps<{
-  id: string;
-  error?: string;
-  options: { value: string; label: string }[];
-  placeholder?: string;
-  disabled?: boolean;
-  required?: boolean;
-  name?: string;
-}>();
-const model = defineModel<string>({ default: "" });
+  id: string
+  error?: string
+  options: { value: string; label: string }[]
+  placeholder?: string
+  disabled?: boolean
+  required?: boolean
+  name?: string
+}>()
+const model = defineModel<string>({ default: '' })
 </script>
 
 <template>

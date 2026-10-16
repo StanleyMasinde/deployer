@@ -11,9 +11,9 @@
   --color-tint: oklch(95% 0.025 45);
   --color-error: oklch(42% 0.15 25);
   --color-error-paper: oklch(97% 0.015 25);
-  --font-body: "Manrope", sans-serif;
-  --font-display: "Manrope", sans-serif;
-  --font-mono: "IBM Plex Mono", monospace;
+  --font-body: 'Manrope', sans-serif;
+  --font-display: 'Manrope', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
   --radius-control: 8px;
   --space-sm: 0.75rem;
   --space-md: 1.5rem;

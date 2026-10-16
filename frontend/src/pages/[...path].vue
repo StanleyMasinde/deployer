@@ -1,5 +1,5 @@
 <script setup lang="ts">
-definePage({ meta: { ssg: false, title: "Page not found · Deployer" } });
+definePage({ meta: { ssg: false, title: 'Page not found · Deployer' } })
 </script>
 
 <template>

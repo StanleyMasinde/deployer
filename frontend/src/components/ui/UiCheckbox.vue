@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import UiIcon from "./UiIcon.vue";
-import { CheckboxRoot, CheckboxIndicator } from "reka-ui";
-const model = defineModel<boolean>({ default: false });
+import UiIcon from './UiIcon.vue'
+import { CheckboxRoot, CheckboxIndicator } from 'reka-ui'
+const model = defineModel<boolean>({ default: false })
 </script>
 
 <template>

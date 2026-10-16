@@ -1,15 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { prerenderedRoutes } from "../src/router/ssg";
+import { expect, it } from 'vitest'
+import { prerenderedRoutes } from '../src/router/ssg'
 
-it("prerenders only explicitly public routes, including nested route groups", () => {
+it('prerenders only explicitly public routes, including nested route groups', () => {
   const result = prerenderedRoutes(
-    ["/", "console", "guide"],
+    ['/', 'console', 'guide'],
     [
-      { path: "/", component: {}, meta: { ssg: true } },
-      { path: "/console", component: {}, meta: { ssg: false } },
-      { path: "/", children: [{ path: "guide", component: {}, meta: { ssg: true } }] },
+      { path: '/', component: {}, meta: { ssg: true } },
+      { path: '/console', component: {}, meta: { ssg: false } },
+      { path: '/', children: [{ path: 'guide', component: {}, meta: { ssg: true } }] },
     ],
-  );
+  )
 
-  expect(result).toEqual(["/", "/guide"]);
-});
+  expect(result).toEqual(['/', '/guide'])
+})

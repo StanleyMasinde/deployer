@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, reactive, computed, watchEffect, onMounted, onUnmounted } from "vue";
-import { buildPreset, type Ecosystem, type PackageManager } from "../build";
-import { appUrl } from "../https";
-import { signInSchema, applicationSchema, useValidation } from "../validation";
-import AuthLayout from "../components/AuthLayout.vue";
-import AppDetails from "../components/AppDetails.vue";
-import UiCheckbox from "../components/ui/UiCheckbox.vue";
-import UiSelect from "../components/ui/UiSelect.vue";
+import { ref, reactive, computed, watchEffect, onMounted, onUnmounted } from 'vue'
+import { buildPreset, type Ecosystem, type PackageManager } from '../build'
+import { appUrl } from '../https'
+import { signInSchema, applicationSchema, useValidation } from '../validation'
+import AuthLayout from '../components/AuthLayout.vue'
+import AppDetails from '../components/AppDetails.vue'
+import UiCheckbox from '../components/ui/UiCheckbox.vue'
+import UiSelect from '../components/ui/UiSelect.vue'
 import {
   Label,
   TabsRoot,
@@ -20,137 +20,142 @@ import {
   DialogTitle,
   DialogDescription,
   DialogClose,
-} from "reka-ui";
-import UiIcon from "../components/ui/UiIcon.vue";
-import "../console.css";
-import UiInput from "../components/ui/UiInput.vue";
-import UiButton from "../components/ui/UiButton.vue";
-import { useRouter } from "vue-router";
-import { ApiError, request, body, type App, type Deployment, type Repository } from "../api/client";
+} from 'reka-ui'
+import UiIcon from '../components/ui/UiIcon.vue'
+import '../console.css'
+import UiInput from '../components/ui/UiInput.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import { useRouter } from 'vue-router'
+import { ApiError, request, body, type App, type Deployment, type Repository } from '../api/client'
 
 definePage({
-  name: "console",
-  meta: { ssg: false, title: "Apps · Deployer" },
-});
+  name: 'console',
+  meta: { ssg: false, title: 'Apps · Deployer' },
+})
 
-const router = useRouter();
-const view = ref("apps");
-const search = ref("");
-const filter = ref("all");
-const refreshing = ref(false);
-const lastUpdated = ref<Date>();
-const authenticated = ref(false);
-const checking = ref(true);
+const router = useRouter()
+const view = ref('apps')
+function clearFilters() {
+  search.value = ''
+  filter.value = 'all'
+}
+
+const search = ref('')
+const filter = ref('all')
+const refreshing = ref(false)
+const lastUpdated = ref<Date>()
+const authenticated = ref(false)
+const checking = ref(true)
 watchEffect(() => {
-  if (typeof document !== "undefined")
-    document.title = `${authenticated.value ? (view.value === "apps" ? "Applications" : "Deployments") : "Sign in"} · Deployer`;
-});
-const busy = ref(false);
-const error = ref("");
-const notice = ref("");
-const password = ref("");
-const email = ref("");
-const { errors: fieldErrors, validate } = useValidation();
-const apps = ref<App[]>([]);
-const deployments = ref<Deployment[]>([]);
-const repositories = ref<Repository[]>([]);
-const adding = ref(false);
-const editing = ref<number | null>(null);
-const detailAppId = ref<number | null>(null);
-const detailsOpen = ref(false);
-const loadingRepositories = ref(false);
+  if (typeof document !== 'undefined')
+    document.title = `${authenticated.value ? (view.value === 'apps' ? 'Applications' : 'Deployments') : 'Sign in'} · Deployer`
+})
+const busy = ref(false)
+const error = ref('')
+const notice = ref('')
+const password = ref('')
+const email = ref('')
+const { errors: fieldErrors, validate } = useValidation()
+const apps = ref<App[]>([])
+const deployments = ref<Deployment[]>([])
+const repositories = ref<Repository[]>([])
+const adding = ref(false)
+const editing = ref<number | null>(null)
+const detailAppId = ref<number | null>(null)
+const detailsOpen = ref(false)
+const loadingRepositories = ref(false)
 const form = reactive({
-  repository: "",
-  branch: "main",
-  domain: "",
-  ...buildPreset("none"),
+  repository: '',
+  branch: 'main',
+  domain: '',
+  ...buildPreset('none'),
   spa: false,
-});
+})
 const repositoryOptions = computed(() => {
   const options = repositories.value.map((repo) => ({
     value: repo.fullName,
     label: repo.fullName,
-  }));
+  }))
   if (
     editing.value !== null &&
     form.repository &&
     !options.some((option) => option.value === form.repository)
   )
-    options.unshift({ value: form.repository, label: form.repository });
-  return options;
-});
-let timer: ReturnType<typeof setTimeout> | undefined;
-let stopped = false;
-let formTrigger: HTMLElement | null = null;
-let detailTrigger: HTMLElement | null = null;
+    options.unshift({ value: form.repository, label: form.repository })
+  return options
+})
+let timer: ReturnType<typeof setTimeout> | undefined
+let stopped = false
+let formTrigger: HTMLElement | null = null
+let detailTrigger: HTMLElement | null = null
 
 async function refresh() {
   try {
     const [nextApps, nextDeployments] = await Promise.all([
-      request<App[]>("/apps"),
-      request<Deployment[]>("/deployments"),
-    ]);
+      request<App[]>('/apps'),
+      request<Deployment[]>('/deployments'),
+    ])
 
-    apps.value = nextApps;
-    deployments.value = nextDeployments;
-    lastUpdated.value = new Date();
+    apps.value = nextApps
+    deployments.value = nextDeployments
+    lastUpdated.value = new Date()
   } catch (cause) {
-    if (cause instanceof ApiError && cause.status === 401) authenticated.value = false;
-    error.value = cause instanceof Error ? cause.message : "Could not refresh deployments.";
+    if (cause instanceof ApiError && cause.status === 401) authenticated.value = false
+    error.value = cause instanceof Error ? cause.message : 'Could not refresh deployments.'
   }
 }
 
 async function poll() {
-  if (stopped || !authenticated.value) return;
+  if (stopped || !authenticated.value) return
 
-  await refresh();
+  await refresh()
 
-  if (!stopped && authenticated.value) timer = setTimeout(poll, 5000);
+  if (!stopped && authenticated.value) timer = setTimeout(poll, 5000)
 }
 
 async function signIn() {
-  if (!validate(signInSchema, { email: email.value, password: password.value })) return;
-  busy.value = true;
-  error.value = "";
+  if (!validate(signInSchema, { email: email.value, password: password.value })) return
+  busy.value = true
+  error.value = ''
 
   try {
-    await request("/session", {
-      method: "POST",
-      body: body("sessions", { email: email.value.trim(), password: password.value }),
-    });
-    password.value = "";
-    authenticated.value = true;
-    await poll();
+    await request('/session', {
+      method: 'POST',
+      body: body('sessions', { email: email.value.trim(), password: password.value }),
+    })
+    password.value = ''
+    authenticated.value = true
+    await poll()
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not sign in.";
+    error.value = cause instanceof Error ? cause.message : 'Could not sign in.'
   } finally {
-    busy.value = false;
+    busy.value = false
   }
 }
 
 async function signOut() {
   try {
-    await request("/session", { method: "DELETE" });
-    authenticated.value = false;
-    detailsOpen.value = false;
-    adding.value = false;
-    apps.value = [];
-    deployments.value = [];
-    clearTimeout(timer);
+    await request('/session', { method: 'DELETE' })
+    authenticated.value = false
+    detailsOpen.value = false
+    adding.value = false
+    apps.value = []
+    deployments.value = []
+    clearTimeout(timer)
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not sign out.";
+    error.value = cause instanceof Error ? cause.message : 'Could not sign out.'
   }
 }
 
 function openDetails(app: App) {
-  detailTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  detailAppId.value = app.id;
-  detailsOpen.value = true;
+  detailTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  detailAppId.value = app.id
+  detailsOpen.value = true
 }
 async function openForm(app?: App) {
-  fieldErrors.value = {};
-  detailsOpen.value = false;
-  editing.value = app?.id ?? null;
+  fieldErrors.value = {}
+  detailsOpen.value = false
+  editing.value = app?.id ?? null
   Object.assign(
     form,
     app
@@ -164,199 +169,199 @@ async function openForm(app?: App) {
           outputDirectory: app.outputDirectory,
           spa: app.spa,
         }
-      : { repository: "", branch: "main", domain: "", ...buildPreset("none"), spa: false },
-  );
+      : { repository: '', branch: 'main', domain: '', ...buildPreset('none'), spa: false },
+  )
   formTrigger = app
     ? detailTrigger
     : document.activeElement instanceof HTMLElement
       ? document.activeElement
-      : null;
-  adding.value = true;
-  loadingRepositories.value = true;
-  error.value = "";
+      : null
+  adding.value = true
+  loadingRepositories.value = true
+  error.value = ''
 
   try {
-    repositories.value = await request<Repository[]>("/repositories");
+    repositories.value = await request<Repository[]>('/repositories')
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not list repositories.";
+    error.value = cause instanceof Error ? cause.message : 'Could not list repositories.'
   } finally {
-    loadingRepositories.value = false;
+    loadingRepositories.value = false
   }
 }
 
 function restoreDetailFocus(event: Event) {
-  event.preventDefault();
-  if (!adding.value && detailTrigger?.isConnected) detailTrigger.focus({ preventScroll: true });
+  event.preventDefault()
+  if (!adding.value && detailTrigger?.isConnected) detailTrigger.focus({ preventScroll: true })
 }
 
 function restoreFormFocus(event: Event) {
   if (formTrigger?.isConnected) {
-    event.preventDefault();
-    formTrigger.focus({ preventScroll: true });
+    event.preventDefault()
+    formTrigger.focus({ preventScroll: true })
   }
 }
 
 function changeEcosystem(ecosystem: string) {
-  Object.assign(form, buildPreset(ecosystem as Ecosystem));
+  Object.assign(form, buildPreset(ecosystem as Ecosystem))
 }
 
 function changePackageManager(packageManager: string) {
-  const preset = buildPreset("javascript", packageManager as PackageManager);
-  form.buildConfig = preset.buildConfig;
-  form.installCommand = preset.installCommand;
-  form.buildCommand = preset.buildCommand;
+  const preset = buildPreset('javascript', packageManager as PackageManager)
+  form.buildConfig = preset.buildConfig
+  form.installCommand = preset.installCommand
+  form.buildCommand = preset.buildCommand
 }
 
 function chooseRepository() {
   form.branch =
-    repositories.value.find((repo) => repo.fullName === form.repository)?.defaultBranch ?? "main";
+    repositories.value.find((repo) => repo.fullName === form.repository)?.defaultBranch ?? 'main'
 }
 
 async function addApp() {
-  if (!validate(applicationSchema, form)) return;
-  busy.value = true;
-  error.value = "";
-  notice.value = "";
+  if (!validate(applicationSchema, form)) return
+  busy.value = true
+  error.value = ''
+  notice.value = ''
 
   try {
-    await request(editing.value === null ? "/apps" : `/apps/${editing.value}`, {
-      method: editing.value === null ? "POST" : "PUT",
-      body: body("apps", form),
-    });
-    adding.value = false;
+    await request(editing.value === null ? '/apps' : `/apps/${editing.value}`, {
+      method: editing.value === null ? 'POST' : 'PUT',
+      body: body('apps', form),
+    })
+    adding.value = false
     notice.value =
       editing.value === null
-        ? "Workflow PR opened. Review and merge it on GitHub to enable deployments."
-        : "Settings saved. Domain and routing updates are queued for the worker. Update the workflow PR to apply build changes.";
+        ? 'Workflow PR opened. Review and merge it on GitHub to enable deployments.'
+        : 'Settings saved. Domain and routing updates are queued for the worker. Update the workflow PR to apply build changes.'
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not add the app.";
+    error.value = cause instanceof Error ? cause.message : 'Could not add the app.'
   } finally {
-    await refresh();
-    busy.value = false;
+    await refresh()
+    busy.value = false
   }
 }
 
 async function retryWorkflow(app: App) {
-  busy.value = true;
+  busy.value = true
 
   try {
-    await request(`/apps/${app.id}/workflow`, { method: "POST" });
-    await refresh();
+    await request(`/apps/${app.id}/workflow`, { method: 'POST' })
+    await refresh()
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not open the workflow PR.";
+    error.value = cause instanceof Error ? cause.message : 'Could not open the workflow PR.'
   } finally {
-    busy.value = false;
+    busy.value = false
   }
 }
 
 function latest(app: App) {
   return deployments.value
     .filter((d) => d.appId === app.id)
-    .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)[0];
+    .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)[0]
 }
 function matchesStatus(status: string | undefined) {
   return (
-    filter.value === "all" ||
-    (filter.value === "attention" ? status === "failed" || !status : status === filter.value)
-  );
+    filter.value === 'all' ||
+    (filter.value === 'attention' ? status === 'failed' || !status : status === filter.value)
+  )
 }
 const filteredApps = computed(() =>
   apps.value.filter((app) => {
-    const query = search.value.toLowerCase();
+    const query = search.value.toLowerCase()
     return (
       `${app.domain} ${app.repository} ${app.branch}`.toLowerCase().includes(query) &&
       matchesStatus(latest(app)?.status)
-    );
+    )
   }),
-);
+)
 const sortedDeployments = computed(() =>
   [...deployments.value].sort((a, b) => b.createdAt - a.createdAt || b.id - a.id),
-);
+)
 const filteredDeployments = computed(() =>
   sortedDeployments.value.filter((deployment) => {
-    const app = apps.value.find((a) => a.id === deployment.appId);
+    const app = apps.value.find((a) => a.id === deployment.appId)
     return (
-      `${app?.domain ?? ""} ${app?.repository ?? ""} ${deployment.commitSha}`
+      `${app?.domain ?? ''} ${app?.repository ?? ''} ${deployment.commitSha}`
         .toLowerCase()
         .includes(search.value.toLowerCase()) && matchesStatus(deployment.status)
-    );
+    )
   }),
-);
+)
 const liveApps = computed(
-  () => apps.value.filter((app) => !app.deletionRequested && latest(app)?.status === "live").length,
-);
+  () => apps.value.filter((app) => !app.deletionRequested && latest(app)?.status === 'live').length,
+)
 const attentionApps = computed(
-  () => apps.value.filter((app) => !latest(app) || latest(app)?.status === "failed").length,
-);
+  () => apps.value.filter((app) => !latest(app) || latest(app)?.status === 'failed').length,
+)
 const activeDeployments = computed(
-  () => deployments.value.filter((d) => ["queued", "deploying"].includes(d.status)).length,
-);
+  () => deployments.value.filter((d) => ['queued', 'deploying'].includes(d.status)).length,
+)
 function statusLabel(status?: string) {
   return (
     (
       {
-        live: "Live",
-        failed: "Failed",
-        queued: "Queued",
-        deploying: "Deploying",
-        superseded: "Superseded",
+        live: 'Live',
+        failed: 'Failed',
+        queued: 'Queued',
+        deploying: 'Deploying',
+        superseded: 'Superseded',
       } as Record<string, string>
-    )[status ?? ""] ??
+    )[status ?? ''] ??
     status ??
-    "Awaiting build"
-  );
+    'Awaiting build'
+  )
 }
 function dateLabel(timestamp: number) {
   return new Date(timestamp * 1000).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 function appName(id: number) {
-  return apps.value.find((app) => app.id === id)?.domain ?? `App ${id}`;
+  return apps.value.find((app) => app.id === id)?.domain ?? `App ${id}`
 }
 async function manualRefresh() {
-  refreshing.value = true;
-  error.value = "";
+  refreshing.value = true
+  error.value = ''
   try {
-    await refresh();
+    await refresh()
   } finally {
-    refreshing.value = false;
+    refreshing.value = false
   }
 }
 function changeView(value: string | number) {
-  view.value = String(value);
-  search.value = "";
-  filter.value = "all";
+  view.value = String(value)
+  search.value = ''
+  filter.value = 'all'
 }
 
 onMounted(async () => {
   try {
-    const setup = await request<{ required: boolean }>("/setup");
+    const setup = await request<{ required: boolean }>('/setup')
 
     if (setup.required) {
-      await router.replace("/setup");
-      return;
+      await router.replace('/setup')
+      return
     }
 
-    await request("/session");
-    authenticated.value = true;
-    await poll();
+    await request('/session')
+    authenticated.value = true
+    await poll()
   } catch (cause) {
     if (!(cause instanceof ApiError && cause.status === 401)) {
-      error.value = cause instanceof Error ? cause.message : "Could not check your session.";
+      error.value = cause instanceof Error ? cause.message : 'Could not check your session.'
     }
   } finally {
-    checking.value = false;
+    checking.value = false
   }
-});
+})
 
 onUnmounted(() => {
-  stopped = true;
-  clearTimeout(timer);
-});
+  stopped = true
+  clearTimeout(timer)
+})
 </script>
 
 <template>
@@ -384,7 +389,7 @@ onUnmounted(() => {
         autocomplete="current-password"
         :disabled="busy"
       /><UiButton type="submit" class="primary" :disabled="busy"
-        >{{ busy ? "Signing in…" : "Sign in" }}<UiIcon name="arrow"
+        >{{ busy ? 'Signing in…' : 'Sign in' }}<UiIcon name="arrow"
       /></UiButton>
     </form>
   </AuthLayout>
@@ -425,17 +430,17 @@ onUnmounted(() => {
             <h1>
               {{
                 !authenticated && !checking
-                  ? "Sign in to Deployer"
-                  : view === "apps"
-                    ? "Applications"
-                    : "Deployments"
+                  ? 'Sign in to Deployer'
+                  : view === 'apps'
+                    ? 'Applications'
+                    : 'Deployments'
               }}
             </h1>
             <p>
               {{
-                view === "apps"
-                  ? "Manage repositories, domains, and releases."
-                  : "Track release progress and deployment history."
+                view === 'apps'
+                  ? 'Manage repositories, domains, and releases.'
+                  : 'Track release progress and deployment history.'
               }}
             </p>
           </div>
@@ -526,13 +531,7 @@ onUnmounted(() => {
                 <UiIcon name="search" />
                 <h2>No matching applications</h2>
                 <p>Try another name or show all statuses.</p>
-                <UiButton
-                  @click="
-                    search = '';
-                    filter = 'all';
-                  "
-                  >Clear filters</UiButton
-                >
+                <UiButton @click="clearFilters">Clear filters</UiButton>
               </div>
               <div v-else class="application-list">
                 <div class="application-columns" aria-hidden="true">
@@ -558,7 +557,7 @@ onUnmounted(() => {
                       >
                       <div class="application-meta">
                         <span><UiIcon name="branch" />{{ app.branch }}</span
-                        ><span>{{ app.spa ? "SPA" : "Static site" }}</span>
+                        ><span>{{ app.spa ? 'SPA' : 'Static site' }}</span>
                       </div>
                     </div>
                   </div>
@@ -568,7 +567,7 @@ onUnmounted(() => {
                       :data-status="app.deletionRequested ? 'deleting' : latest(app)?.status"
                       ><span class="state-dot"></span
                       >{{
-                        app.deletionRequested ? "Deleting" : statusLabel(latest(app)?.status)
+                        app.deletionRequested ? 'Deleting' : statusLabel(latest(app)?.status)
                       }}</span
                     ><span v-if="latest(app)" class="deployment-stamp"
                       ><code>{{ latest(app)!.commitSha.slice(0, 7) }}</code
@@ -604,22 +603,16 @@ onUnmounted(() => {
               <div v-if="!filteredDeployments.length" class="inventory-empty">
                 <span class="empty-app-icon"><UiIcon name="activity" /></span>
                 <h2>
-                  {{ deployments.length ? "No matching deployments" : "Ready when you are." }}
+                  {{ deployments.length ? 'No matching deployments' : 'Ready when you are.' }}
                 </h2>
                 <p>
                   {{
                     deployments.length
-                      ? "Try another search or status filter."
-                      : "After a successful GitHub workflow, your deployment appears here. We’ll take it from there."
+                      ? 'Try another search or status filter.'
+                      : 'After a successful GitHub workflow, your deployment appears here. We’ll take it from there.'
                   }}
                 </p>
-                <UiButton
-                  v-if="deployments.length"
-                  @click="
-                    search = '';
-                    filter = 'all';
-                  "
-                  >Clear filters</UiButton
+                <UiButton v-if="deployments.length" @click="clearFilters">Clear filters</UiButton
                 ><UiButton v-else @click="changeView('apps')">View applications</UiButton>
               </div>
               <ol v-else class="console-deployments">
@@ -648,13 +641,13 @@ onUnmounted(() => {
             </template>
             <div class="inventory-footer">
               <span>{{
-                view === "apps"
-                  ? filteredApps.length + " applications"
-                  : filteredDeployments.length + " deployments"
+                view === 'apps'
+                  ? filteredApps.length + ' applications'
+                  : filteredDeployments.length + ' deployments'
               }}</span
               ><span v-if="lastUpdated"
                 >Updated
-                {{ lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                {{ lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 }}<span class="refresh-caption"> · Refreshes every 5s</span></span
               >
             </div>
@@ -686,12 +679,12 @@ onUnmounted(() => {
             ></DialogClose>
           </div>
           <DialogTitle class="modal-title">{{
-            editing === null ? "Connect a repository" : "Edit application"
+            editing === null ? 'Connect a repository' : 'Edit application'
           }}</DialogTitle
           ><DialogDescription class="modal-description">{{
             editing === null
-              ? "Give your next app a home. We’ll open a pull request with your build workflow for you to review."
-              : "Update your source, build, and destination settings. Build changes require an updated workflow PR."
+              ? 'Give your next app a home. We’ll open a pull request with your build workflow for you to review.'
+              : 'Update your source, build, and destination settings. Build changes require an updated workflow PR.'
           }}</DialogDescription>
           <p v-if="error" class="console-message is-error" role="alert">{{ error }}</p>
           <form novalidate class="modal-form" @submit.prevent="addApp">
@@ -779,9 +772,9 @@ onUnmounted(() => {
               />
               <p class="field-hint">
                 {{
-                  form.buildConfig.ecosystem === "none"
-                    ? "Publish files as they are, with no runtime or build step."
-                    : "Build with Vite, then publish the output directory. Commands remain editable."
+                  form.buildConfig.ecosystem === 'none'
+                    ? 'Publish files as they are, with no runtime or build step.'
+                    : 'Build with Vite, then publish the output directory. Commands remain editable.'
                 }}
               </p>
               <div v-if="form.buildConfig.ecosystem === 'javascript'" class="modal-field-grid">
@@ -813,9 +806,9 @@ onUnmounted(() => {
               />
               <p class="field-hint">
                 {{
-                  form.buildConfig.ecosystem === "none"
-                    ? "The folder containing index.html. Use . for the repository root."
-                    : "The folder containing your built index.html."
+                  form.buildConfig.ecosystem === 'none'
+                    ? 'The folder containing index.html. Use . for the repository root.'
+                    : 'The folder containing your built index.html.'
                 }}
               </p>
             </fieldset>
@@ -849,11 +842,11 @@ onUnmounted(() => {
                 >{{
                   busy
                     ? editing === null
-                      ? "Opening PR…"
-                      : "Saving…"
+                      ? 'Opening PR…'
+                      : 'Saving…'
                     : editing === null
-                      ? "Create workflow PR"
-                      : "Save settings"
+                      ? 'Create workflow PR'
+                      : 'Save settings'
                 }}<UiIcon name="arrow"
               /></UiButton>
             </div>

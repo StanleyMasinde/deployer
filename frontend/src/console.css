@@ -79,7 +79,7 @@
   color: var(--color-muted);
   white-space: nowrap;
 }
-.workspace-nav button[data-state="active"] {
+.workspace-nav button[data-state='active'] {
   background: var(--color-tint);
   color: var(--color-accent);
   font-weight: 500;
@@ -238,8 +238,8 @@
   opacity: 0.55;
   cursor: not-allowed;
 }
-.deployment-console input[aria-invalid="true"],
-.console-modal input[aria-invalid="true"] {
+.deployment-console input[aria-invalid='true'],
+.console-modal input[aria-invalid='true'] {
   border-color: var(--color-error);
 }
 .inventory-tools {
@@ -360,16 +360,16 @@
   line-height: 1.6;
   white-space: nowrap;
 }
-.deployment-status[data-status="live"] {
+.deployment-status[data-status='live'] {
   color: var(--color-success);
   background: var(--color-success-paper);
 }
-.deployment-status[data-status="failed"] {
+.deployment-status[data-status='failed'] {
   color: var(--color-error);
   background: var(--color-error-paper);
 }
-.deployment-status[data-status="deploying"],
-.deployment-status[data-status="queued"] {
+.deployment-status[data-status='deploying'],
+.deployment-status[data-status='queued'] {
   color: var(--color-accent);
   background: var(--color-tint);
 }
@@ -531,7 +531,7 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.timeline-marker[data-status="live"] {
+.timeline-marker[data-status='live'] {
   color: var(--color-success);
   background: var(--color-success-paper);
 }
@@ -1127,7 +1127,7 @@
   flex: initial;
   padding-inline: var(--space-control);
 }
-.workspace-nav button[data-state="active"] {
+.workspace-nav button[data-state='active'] {
   background: var(--color-paper);
   color: var(--color-ink);
 }

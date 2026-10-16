@@ -13,7 +13,7 @@ import {
   ArrowPathIcon,
   CheckIcon,
   ChevronDownIcon,
-} from "@heroicons/vue/24/outline";
+} from '@heroicons/vue/24/outline'
 
 const icons = {
   apps: Squares2X2Icon,
@@ -29,8 +29,8 @@ const icons = {
   refresh: ArrowPathIcon,
   check: CheckIcon,
   chevron: ChevronDownIcon,
-};
-defineProps<{ name: keyof typeof icons }>();
+}
+defineProps<{ name: keyof typeof icons }>()
 </script>
 
 <template>

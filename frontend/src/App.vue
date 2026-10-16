@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { ConfigProvider } from "reka-ui";
-import { ref, onMounted } from "vue";
-import UiIcon from "./components/ui/UiIcon.vue";
-import { useRoute } from "vue-router";
-const route = useRoute();
-const scrollBody = ref<boolean | { padding: number; margin: number }>(true);
+import { ConfigProvider } from 'reka-ui'
+import { ref, onMounted } from 'vue'
+import UiIcon from './components/ui/UiIcon.vue'
+import { useRoute } from 'vue-router'
+const route = useRoute()
+const scrollBody = ref<boolean | { padding: number; margin: number }>(true)
 onMounted(() => {
-  if (CSS.supports("scrollbar-gutter: stable")) scrollBody.value = { padding: 0, margin: 0 };
-});
+  if (CSS.supports('scrollbar-gutter: stable')) scrollBody.value = { padding: 0, margin: 0 }
+})
 </script>
 
 <template>

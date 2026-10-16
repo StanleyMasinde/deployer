@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { deletionSchema, useValidation } from "../validation";
-const { errors: fieldErrors, validate } = useValidation();
-import { ref, watch, computed, onUnmounted } from "vue";
+import { deletionSchema, useValidation } from '../validation'
+const { errors: fieldErrors, validate } = useValidation()
+import { ref, watch, computed, onUnmounted } from 'vue'
 import {
   DialogRoot,
   DialogPortal,
@@ -19,127 +19,132 @@ import {
   AlertDialogDescription,
   AlertDialogCancel,
   Label,
-} from "reka-ui";
-import { httpsStatus, appUrl } from "../https";
-import { request, type App, type Deployment } from "../api/client";
-import UiButton from "./ui/UiButton.vue";
-import UiInput from "./ui/UiInput.vue";
-import UiIcon from "./ui/UiIcon.vue";
-const props = defineProps<{ open: boolean; appId: number | null }>();
+} from 'reka-ui'
+import { httpsStatus, appUrl } from '../https'
+import { request, type App, type Deployment } from '../api/client'
+import UiButton from './ui/UiButton.vue'
+import UiInput from './ui/UiInput.vue'
+import UiIcon from './ui/UiIcon.vue'
+const props = defineProps<{ open: boolean; appId: number | null }>()
 const emit = defineEmits<{
-  "update:open": [boolean];
-  edit: [App];
-  changed: [];
-  closeAutoFocus: [Event];
-}>();
-const app = ref<App>();
-const deployments = ref<Deployment[]>([]);
+  'update:open': [boolean]
+  edit: [App]
+  changed: []
+  closeAutoFocus: [Event]
+}>()
+const app = ref<App>()
+const deployments = ref<Deployment[]>([])
 const loading = ref(false),
   busy = ref(false),
-  error = ref(""),
+  error = ref(''),
   confirming = ref(false),
-  confirmation = ref("");
+  confirmation = ref('')
 const certificateStatus = computed(() =>
-  app.value ? httpsStatus(app.value.domain, app.value.https) : "disabled",
-);
-let poll: ReturnType<typeof setInterval> | undefined;
+  app.value ? httpsStatus(app.value.domain, app.value.https) : 'disabled',
+)
+function resetDeletionConfirmation() {
+  confirmation.value = ''
+  error.value = ''
+}
+
+let poll: ReturnType<typeof setInterval> | undefined
 watch(
   () => props.open,
   (open) => {
-    clearInterval(poll);
+    clearInterval(poll)
     if (open)
       poll = setInterval(async () => {
-        if (busy.value || confirming.value || !app.value) return;
-        const id = props.appId;
+        if (busy.value || confirming.value || !app.value) return
+        const id = props.appId
         try {
-          const record = await request<App>(`/apps/${id}`);
-          if (props.open && props.appId === id) app.value = record;
+          const record = await request<App>(`/apps/${id}`)
+          if (props.open && props.appId === id) app.value = record
         } catch {
           /* Retry on the next poll. */
         }
-      }, 5000);
+      }, 5000)
   },
-);
+)
 onUnmounted(() => {
-  clearInterval(poll);
-  generation++;
-});
+  clearInterval(poll)
+  generation++
+})
 async function enableHttps() {
-  if (!app.value) return;
-  busy.value = true;
-  error.value = "";
+  if (!app.value) return
+  busy.value = true
+  error.value = ''
   try {
-    app.value = await request<App>(`/apps/${app.value.id}/https`, { method: "POST" });
-    emit("changed");
+    app.value = await request<App>(`/apps/${app.value.id}/https`, { method: 'POST' })
+    emit('changed')
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not request HTTPS.";
+    error.value = cause instanceof Error ? cause.message : 'Could not request HTTPS.'
   } finally {
-    busy.value = false;
+    busy.value = false
   }
 }
-let generation = 0;
+let generation = 0
 async function load() {
-  const current = ++generation;
-  if (!props.open || props.appId === null) return;
-  loading.value = true;
-  error.value = "";
+  const current = ++generation
+  if (!props.open || props.appId === null) return
+  loading.value = true
+  error.value = ''
   try {
     const [record, history] = await Promise.all([
       request<App>(`/apps/${props.appId}`),
       request<Deployment[]>(`/apps/${props.appId}/deployments`),
-    ]);
-    if (current !== generation) return;
-    app.value = record;
-    deployments.value = history;
+    ])
+    if (current !== generation) return
+    app.value = record
+    deployments.value = history
   } catch (cause) {
     if (current === generation)
-      error.value = cause instanceof Error ? cause.message : "Could not load application.";
+      error.value = cause instanceof Error ? cause.message : 'Could not load application.'
   } finally {
-    if (current === generation) loading.value = false;
+    if (current === generation) loading.value = false
   }
 }
 watch(
   () => [props.open, props.appId],
   () => {
-    app.value = undefined;
-    deployments.value = [];
-    confirming.value = false;
-    confirmation.value = "";
-    fieldErrors.value = {};
-    void load();
+    app.value = undefined
+    deployments.value = []
+    confirming.value = false
+    confirmation.value = ''
+    fieldErrors.value = {}
+    void load()
   },
   { immediate: true },
-);
+)
 async function remove() {
   if (
     !app.value ||
     !validate(deletionSchema(app.value.domain), { confirmation: confirmation.value })
   )
-    return;
-  busy.value = true;
-  error.value = "";
+    return
+  busy.value = true
+  error.value = ''
   try {
-    await request(`/apps/${app.value.id}`, { method: "DELETE" });
-    confirming.value = false;
-    emit("update:open", false);
-    emit("changed");
+    await request(`/apps/${app.value.id}`, { method: 'DELETE' })
+    confirming.value = false
+    emit('update:open', false)
+    emit('changed')
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not delete application.";
+    error.value = cause instanceof Error ? cause.message : 'Could not delete application.'
   } finally {
-    busy.value = false;
+    busy.value = false
   }
 }
 async function workflow() {
-  if (!app.value) return;
-  busy.value = true;
-  error.value = "";
+  if (!app.value) return
+  busy.value = true
+  error.value = ''
   try {
-    app.value = await request<App>(`/apps/${app.value.id}/workflow`, { method: "POST" });
-    emit("changed");
+    app.value = await request<App>(`/apps/${app.value.id}/workflow`, { method: 'POST' })
+    emit('changed')
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Could not update workflow PR.";
+    error.value = cause instanceof Error ? cause.message : 'Could not update workflow PR.'
   } finally {
-    busy.value = false;
+    busy.value = false
   }
 }
 </script>
@@ -160,7 +165,7 @@ async function workflow() {
               ><UiIcon name="close" /></UiButton
           ></DialogClose>
         </div>
-        <DialogTitle class="modal-title">{{ app?.domain ?? "Application details" }}</DialogTitle>
+        <DialogTitle class="modal-title">{{ app?.domain ?? 'Application details' }}</DialogTitle>
         <DialogDescription class="modal-description"
           >Configuration and deployment history for this application.</DialogDescription
         >
@@ -205,7 +210,7 @@ async function workflow() {
               </div>
               <div>
                 <dt>Routing</dt>
-                <dd>{{ app.spa ? "Single-page application" : "Static files" }}</dd>
+                <dd>{{ app.spa ? 'Single-page application' : 'Static files' }}</dd>
               </div>
             </dl>
           </section>
@@ -223,11 +228,11 @@ async function workflow() {
                 "
                 >{{
                   {
-                    disabled: "Not enabled",
-                    pending: "Certificate pending",
-                    active: "HTTPS active",
-                    failed: "Certificate failed",
-                    expired: "Certificate expired",
+                    disabled: 'Not enabled',
+                    pending: 'Certificate pending',
+                    active: 'HTTPS active',
+                    failed: 'Certificate failed',
+                    expired: 'Certificate expired',
                   }[certificateStatus]
                 }}</span
               >
@@ -252,10 +257,10 @@ async function workflow() {
               @click="enableHttps"
               >{{
                 busy
-                  ? "Requesting…"
-                  : certificateStatus === "disabled"
-                    ? "Enable HTTPS"
-                    : "Retry certificate"
+                  ? 'Requesting…'
+                  : certificateStatus === 'disabled'
+                    ? 'Enable HTTPS'
+                    : 'Retry certificate'
               }}</UiButton
             >
           </section>
@@ -269,7 +274,7 @@ async function workflow() {
               <div>
                 <dt>Ecosystem</dt>
                 <dd>
-                  {{ app.buildConfig.ecosystem === "none" ? "No build tools" : "JavaScript" }}
+                  {{ app.buildConfig.ecosystem === 'none' ? 'No build tools' : 'JavaScript' }}
                 </dd>
               </div>
               <div v-if="app.buildConfig.packageManager">
@@ -280,7 +285,7 @@ async function workflow() {
                 <dt>Framework</dt>
                 <dd>
                   {{
-                    app.buildConfig.framework === "vite" ? "Vite" : "Plain HTML / CSS / JavaScript"
+                    app.buildConfig.framework === 'vite' ? 'Vite' : 'Plain HTML / CSS / JavaScript'
                   }}
                 </dd>
               </div>
@@ -312,7 +317,7 @@ async function workflow() {
                 rel="noopener noreferrer"
                 >Open workflow PR<UiIcon name="arrow" /></a
               ><UiButton :disabled="busy || app.deletionRequested" @click="workflow">{{
-                busy ? "Working…" : "Update workflow PR"
+                busy ? 'Working…' : 'Update workflow PR'
               }}</UiButton>
             </div>
             <p class="field-hint">
@@ -353,11 +358,8 @@ async function workflow() {
                 ><UiButton
                   class="danger-button"
                   :disabled="busy"
-                  @click="
-                    confirmation = '';
-                    error = '';
-                  "
-                  >{{ app.deletionRequested ? "Retry removal" : "Delete application" }}</UiButton
+                  @click="resetDeletionConfirmation"
+                  >{{ app.deletionRequested ? 'Retry removal' : 'Delete application' }}</UiButton
                 ></AlertDialogTrigger
               ><AlertDialogPortal
                 ><AlertDialogOverlay class="confirm-overlay" /><AlertDialogContent
@@ -382,7 +384,7 @@ async function workflow() {
                       <AlertDialogCancel as-child
                         ><UiButton :disabled="busy">Cancel</UiButton></AlertDialogCancel
                       ><UiButton type="submit" class="danger-button" :disabled="busy">{{
-                        busy ? "Deleting…" : "Delete application"
+                        busy ? 'Deleting…' : 'Delete application'
                       }}</UiButton>
                     </div>
                   </form></AlertDialogContent
