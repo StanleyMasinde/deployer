@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UiIcon from "./UiIcon.vue";
 import {
   SelectRoot,
   SelectTrigger,
@@ -14,6 +15,7 @@ import {
 defineOptions({ inheritAttrs: false });
 defineProps<{
   id: string;
+  error?: string;
   options: { value: string; label: string }[];
   placeholder?: string;
   disabled?: boolean;
@@ -25,9 +27,15 @@ const model = defineModel<string>({ default: "" });
 
 <template>
   <SelectRoot v-model="model" :disabled="disabled" :required="required" :name="name">
-    <SelectTrigger v-bind="$attrs" :id="id" class="select-trigger">
+    <SelectTrigger
+      v-bind="$attrs"
+      :id="id"
+      class="select-trigger"
+      :aria-invalid="error ? true : undefined"
+      :aria-describedby="error ? `${id}-error` : $attrs['aria-describedby']"
+    >
       <SelectValue :placeholder="placeholder" />
-      <SelectIcon aria-hidden="true">▾</SelectIcon>
+      <SelectIcon aria-hidden="true"><UiIcon name="chevron" /></SelectIcon>
     </SelectTrigger>
     <SelectPortal>
       <SelectContent class="select-content" position="popper" :side-offset="4">
@@ -39,10 +47,11 @@ const model = defineModel<string>({ default: "" });
             class="select-item"
           >
             <SelectItemText>{{ option.label }}</SelectItemText>
-            <SelectItemIndicator aria-hidden="true">✓</SelectItemIndicator>
+            <SelectItemIndicator aria-hidden="true"><UiIcon name="check" /></SelectItemIndicator>
           </SelectItem>
         </SelectViewport>
       </SelectContent>
     </SelectPortal>
   </SelectRoot>
+  <p v-if="error" :id="`${id}-error`" class="field-error" role="alert">{{ error }}</p>
 </template>

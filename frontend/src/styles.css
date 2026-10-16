@@ -3,7 +3,7 @@
  * Nav: N9 edge-aligned minimal · footer: Ft2 inline-rule
  * Audience: VPS owners · use: connect and monitor static apps · tone: utilitarian
  */
-@import "../tokens.css";
+@import "./assets/tokens.css";
 
 * {
   box-sizing: border-box;
@@ -510,4 +510,72 @@ input:not([type="checkbox"]),
   font-size: 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Shared Deployer identity — design.md */
+h1,
+h2,
+h3 {
+  font-style: normal;
+}
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+.welcome h1 {
+  font-weight: 600;
+  max-width: 900px;
+}
+.masthead,
+.footer {
+  max-width: 1120px;
+}
+button,
+.button,
+input,
+.select-trigger {
+  transition:
+    background-color var(--dur-short),
+    border-color var(--dur-short);
+}
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .button,
+  input,
+  .select-trigger {
+    transition: none;
+  }
+}
+
+/* Reserve the scrollbar lane; ConfigProvider avoids double compensation. */
+html {
+  scrollbar-gutter: stable;
+}
+.ui-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.select-trigger {
+  white-space: nowrap;
+}
+.select-trigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.select-trigger > span:last-child {
+  flex-shrink: 0;
+  display: inline-flex;
+}
+.field-error {
+  color: var(--color-error);
+  font-size: var(--text-small);
+  margin: var(--space-xs) 0 var(--space-control);
+}
+input[aria-invalid="true"],
+.select-trigger[aria-invalid="true"] {
+  border-color: var(--color-error);
 }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { deletionSchema, useValidation } from "../validation";
+const { errors: fieldErrors, validate } = useValidation();
 import { ref, watch, computed, onUnmounted } from "vue";
 import {
   DialogRoot,
@@ -103,12 +105,17 @@ watch(
     deployments.value = [];
     confirming.value = false;
     confirmation.value = "";
+    fieldErrors.value = {};
     void load();
   },
   { immediate: true },
 );
 async function remove() {
-  if (!app.value || confirmation.value !== app.value.domain) return;
+  if (
+    !app.value ||
+    !validate(deletionSchema(app.value.domain), { confirmation: confirmation.value })
+  )
+    return;
   busy.value = true;
   error.value = "";
   try {
@@ -141,20 +148,20 @@ async function workflow() {
   <DialogRoot :open="open" @update:open="emit('update:open', $event)"
     ><DialogPortal
       ><DialogOverlay class="console-dialog-overlay" /><DialogContent
-        class="console-drawer application-details"
+        class="console-modal application-details"
         @close-auto-focus="emit('closeAutoFocus', $event)"
         @interact-outside="busy && $event.preventDefault()"
         @escape-key-down="busy && $event.preventDefault()"
       >
-        <div class="drawer-heading">
-          <span class="drawer-icon"><UiIcon name="apps" /></span
+        <div class="modal-heading">
+          <span class="modal-icon"><UiIcon name="apps" /></span
           ><DialogClose as-child
             ><UiButton aria-label="Close application details" :disabled="busy"
               ><UiIcon name="close" /></UiButton
           ></DialogClose>
         </div>
-        <DialogTitle class="drawer-title">{{ app?.domain ?? "Application details" }}</DialogTitle>
-        <DialogDescription class="drawer-description"
+        <DialogTitle class="modal-title">{{ app?.domain ?? "Application details" }}</DialogTitle>
+        <DialogDescription class="modal-description"
           >Configuration and deployment history for this application.</DialogDescription
         >
         <p v-if="error && !confirming" class="console-message is-error" role="alert">{{ error }}</p>
@@ -362,23 +369,21 @@ async function workflow() {
                     cannot be undone.</AlertDialogDescription
                   >
                   <p v-if="error" class="console-message is-error" role="alert">{{ error }}</p>
-                  <form @submit.prevent="remove">
+                  <form novalidate @submit.prevent="remove">
                     <Label for="delete-confirmation">Type {{ app.domain }} to confirm</Label
                     ><UiInput
                       id="delete-confirmation"
+                      :error="fieldErrors['confirmation']"
                       v-model="confirmation"
                       autocomplete="off"
                       :disabled="busy"
                     />
-                    <div class="drawer-actions">
+                    <div class="modal-actions">
                       <AlertDialogCancel as-child
                         ><UiButton :disabled="busy">Cancel</UiButton></AlertDialogCancel
-                      ><UiButton
-                        type="submit"
-                        class="danger-button"
-                        :disabled="busy || confirmation !== app.domain"
-                        >{{ busy ? "Deleting…" : "Delete application" }}</UiButton
-                      >
+                      ><UiButton type="submit" class="danger-button" :disabled="busy">{{
+                        busy ? "Deleting…" : "Delete application"
+                      }}</UiButton>
                     </div>
                   </form></AlertDialogContent
                 ></AlertDialogPortal

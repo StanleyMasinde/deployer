@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from "vue";
 import { Label } from "reka-ui";
+import { setupSchema, useValidation } from "../validation";
+import AuthLayout from "../components/AuthLayout.vue";
 import UiInput from "../components/ui/UiInput.vue";
 import UiButton from "../components/ui/UiButton.vue";
 import { useRouter } from "vue-router";
@@ -13,6 +15,7 @@ const form = reactive({ code: "", name: "", email: "", password: "", confirmatio
 const checking = ref(true);
 const busy = ref(false);
 const error = ref("");
+const { errors: fieldErrors, validate } = useValidation();
 
 onMounted(async () => {
   try {
@@ -29,10 +32,7 @@ onMounted(async () => {
 async function createRoot() {
   error.value = "";
 
-  if (form.password !== form.confirmation) {
-    error.value = "Passwords do not match.";
-    return;
-  }
+  if (!validate(setupSchema, form)) return;
 
   busy.value = true;
 
@@ -59,54 +59,55 @@ async function createRoot() {
 </script>
 
 <template>
-  <main id="main" class="console">
-    <p class="eyebrow">FIRST RUN / YOUR INSTANCE</p>
-    <h1>Make yourself at home.</h1>
-    <p>Create the root account that will manage this VPS.</p>
+  <AuthLayout
+    title="Create your root account"
+    description="Set up the account that will manage this instance."
+  >
     <p v-if="checking" role="status">Checking your instance…</p>
-    <form v-else class="signin" @submit.prevent="createRoot">
-      <h2>Create your root account</h2>
+    <form novalidate v-else class="auth-form" @submit.prevent="createRoot">
       <p>Read the one-time setup code on your VPS:</p>
       <pre class="setup-command"><code>sudo cat /var/lib/deployer/state/setup-code</code></pre>
-      <p v-if="error" class="message error" role="alert">{{ error }}</p>
+      <p v-if="error" class="console-message is-error" role="alert">{{ error }}</p>
       <Label for="code">Setup code</Label>
-      <UiInput id="code" v-model="form.code" required autocomplete="off" :disabled="busy" />
+      <UiInput
+        id="code"
+        :error="fieldErrors['code']"
+        v-model="form.code"
+        autocomplete="off"
+        :disabled="busy"
+      />
       <Label for="name">Name</Label>
       <UiInput
         id="name"
+        :error="fieldErrors['name']"
         v-model="form.name"
-        required
-        maxlength="128"
         autocomplete="name"
         :disabled="busy"
       />
       <Label for="email">Email address</Label>
       <UiInput
         id="email"
+        :error="fieldErrors['email']"
         v-model="form.email"
         type="email"
-        required
-        maxlength="254"
         autocomplete="email"
         :disabled="busy"
       />
       <Label for="password">Password</Label>
       <UiInput
         id="password"
+        :error="fieldErrors['password']"
         v-model="form.password"
-        required
         type="password"
-        minlength="12"
         autocomplete="new-password"
         :disabled="busy"
       />
       <Label for="confirmation">Confirm password</Label>
       <UiInput
         id="confirmation"
+        :error="fieldErrors['confirmation']"
         v-model="form.confirmation"
-        required
         type="password"
-        minlength="12"
         autocomplete="new-password"
         :disabled="busy"
       />
@@ -114,5 +115,5 @@ async function createRoot() {
         {{ busy ? "Creating account…" : "Create root account" }}
       </UiButton>
     </form>
-  </main>
+  </AuthLayout>
 </template>

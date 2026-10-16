@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from "vue";
+import { ref, reactive, computed, watchEffect, onMounted, onUnmounted } from "vue";
 import { buildPreset, type Ecosystem, type PackageManager } from "../build";
 import { appUrl } from "../https";
+import { signInSchema, applicationSchema, useValidation } from "../validation";
+import AuthLayout from "../components/AuthLayout.vue";
 import AppDetails from "../components/AppDetails.vue";
 import UiCheckbox from "../components/ui/UiCheckbox.vue";
 import UiSelect from "../components/ui/UiSelect.vue";
@@ -39,11 +41,16 @@ const refreshing = ref(false);
 const lastUpdated = ref<Date>();
 const authenticated = ref(false);
 const checking = ref(true);
+watchEffect(() => {
+  if (typeof document !== "undefined")
+    document.title = `${authenticated.value ? (view.value === "apps" ? "Applications" : "Deployments") : "Sign in"} · Deployer`;
+});
 const busy = ref(false);
 const error = ref("");
 const notice = ref("");
 const password = ref("");
 const email = ref("");
+const { errors: fieldErrors, validate } = useValidation();
 const apps = ref<App[]>([]);
 const deployments = ref<Deployment[]>([]);
 const repositories = ref<Repository[]>([]);
@@ -102,6 +109,7 @@ async function poll() {
 }
 
 async function signIn() {
+  if (!validate(signInSchema, { email: email.value, password: password.value })) return;
   busy.value = true;
   error.value = "";
 
@@ -140,6 +148,7 @@ function openDetails(app: App) {
   detailsOpen.value = true;
 }
 async function openForm(app?: App) {
+  fieldErrors.value = {};
   detailsOpen.value = false;
   editing.value = app?.id ?? null;
   Object.assign(
@@ -204,6 +213,7 @@ function chooseRepository() {
 }
 
 async function addApp() {
+  if (!validate(applicationSchema, form)) return;
   busy.value = true;
   error.value = "";
   notice.value = "";
@@ -350,17 +360,39 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <TabsRoot class="deployment-console" :model-value="view" @update:model-value="changeView">
+  <AuthLayout
+    v-if="!checking && !authenticated"
+    title="Sign in to Deployer"
+    description="Use your root account to manage this instance."
+  >
+    <form novalidate class="auth-form" @submit.prevent="signIn">
+      <p v-if="error" class="console-message is-error" role="alert">{{ error }}</p>
+      <Label for="email">Email address</Label
+      ><UiInput
+        id="email"
+        :error="fieldErrors['email']"
+        v-model="email"
+        type="email"
+        autocomplete="username"
+        :disabled="busy"
+      /><Label for="password">Password</Label
+      ><UiInput
+        id="password"
+        :error="fieldErrors['password']"
+        v-model="password"
+        type="password"
+        autocomplete="current-password"
+        :disabled="busy"
+      /><UiButton type="submit" class="primary" :disabled="busy"
+        >{{ busy ? "Signing in…" : "Sign in" }}<UiIcon name="arrow"
+      /></UiButton>
+    </form>
+  </AuthLayout>
+  <TabsRoot v-else class="deployment-console" :model-value="view" @update:model-value="changeView">
     <aside class="console-sidebar">
       <RouterLink class="console-brand" to="/" aria-label="Deployer home"
-        ><span class="brand-symbol"><UiIcon name="arrow" /></span>deployer<span class="brand-period"
-          >.</span
-        ></RouterLink
+        ><span class="brand-symbol" aria-hidden="true">↥</span>Deployer</RouterLink
       >
-      <div class="instance-switch">
-        <UiIcon name="server" />
-        <div><strong>Your instance</strong><span>Personal workspace</span></div>
-      </div>
       <nav aria-label="Workspace navigation">
         <TabsList class="workspace-nav" aria-label="Workspace sections">
           <TabsTrigger value="apps"
@@ -377,53 +409,33 @@ onUnmounted(() => {
           >
         </TabsList>
       </nav>
-      <div class="sidebar-bottom">
-        <div class="ownership-note">
-          <UiIcon name="server" /><strong>Your server.<br />Your apps.</strong>
-          <p>Built on GitHub.<br />Served from your VPS.</p>
-        </div>
-        <UiButton
-          v-if="authenticated"
-          class="signout-button"
-          aria-label="Sign out"
-          :disabled="busy"
-          @click="signOut"
-          ><span class="owner-avatar">R</span><span>Root account<small>Instance owner</small></span
-          ><UiIcon name="logout"
-        /></UiButton>
-        <RouterLink v-else class="sidebar-home" to="/"
-          >Back to home <span aria-hidden="true">↗</span></RouterLink
+      <div class="console-account">
+        <span class="workspace-label">Your instance</span>
+        <UiButton v-if="authenticated" aria-label="Sign out" :disabled="busy" @click="signOut"
+          ><UiIcon name="logout" /><span>Sign out</span></UiButton
         >
       </div>
     </aside>
 
     <div class="console-workspace">
-      <header class="workspace-header">
-        <div class="workspace-breadcrumb">
-          Workspace<span aria-hidden="true">/</span
-          ><strong>{{ view === "apps" ? "Applications" : "Deployments" }}</strong>
-        </div>
-        <div class="workspace-header-actions">
-          <span class="workspace-label">Self-hosted</span
-          ><UiButton
-            v-if="authenticated"
-            class="mobile-signout"
-            aria-label="Sign out"
-            :disabled="busy"
-            @click="signOut"
-            ><UiIcon name="logout"
-          /></UiButton>
-        </div>
-      </header>
       <main id="main" class="workspace-main">
         <div class="workspace-heading">
           <div>
-            <h1>{{ view === "apps" ? "Applications" : "Deployments" }}</h1>
+            <p class="page-eyebrow"><UiIcon name="server" /> INSTANCE CONSOLE</p>
+            <h1>
+              {{
+                !authenticated && !checking
+                  ? "Sign in to Deployer"
+                  : view === "apps"
+                    ? "Applications"
+                    : "Deployments"
+              }}
+            </h1>
             <p>
               {{
                 view === "apps"
-                  ? "A place for everything you ship."
-                  : "Every release, from workflow to web."
+                  ? "Manage repositories, domains, and releases."
+                  : "Track release progress and deployment history."
               }}
             </p>
           </div>
@@ -440,41 +452,6 @@ onUnmounted(() => {
           <span class="loading-line"></span><span class="loading-line"></span>
           <p>Loading your workspace…</p>
         </div>
-        <section v-else-if="!authenticated" class="console-auth">
-          <div class="auth-intro">
-            <span class="auth-icon"><UiIcon name="server" /></span>
-            <h2>Welcome back.</h2>
-            <p>Your applications, deployments, and next big idea. All in one place.</p>
-            <div class="auth-detail">
-              <UiIcon name="repo" />GitHub builds. Your server delivers.
-            </div>
-          </div>
-          <form class="console-signin" @submit.prevent="signIn">
-            <h2>Sign in to your instance</h2>
-            <p>Use your root account to continue.</p>
-            <Label for="email">Email address</Label
-            ><UiInput
-              id="email"
-              v-model="email"
-              type="email"
-              autocomplete="username"
-              maxlength="254"
-              required
-              :disabled="busy"
-            /><Label for="password">Password</Label
-            ><UiInput
-              id="password"
-              v-model="password"
-              type="password"
-              autocomplete="current-password"
-              required
-              :disabled="busy"
-            /><UiButton type="submit" class="primary" :disabled="busy"
-              >{{ busy ? "Signing in…" : "Sign in" }}<UiIcon name="arrow"
-            /></UiButton>
-          </form>
-        </section>
-
         <template v-else>
           <dl class="workspace-summary" aria-label="Deployment summary">
             <div>
@@ -682,21 +659,8 @@ onUnmounted(() => {
               >
             </div>
           </TabsContent>
-          <aside v-if="view === 'apps'" class="workflow-note">
-            <UiIcon name="branch" />
-            <div>
-              <strong>A push is all it takes.</strong>
-              <p>
-                Merge your workflow PR, then push to your connected branch. GitHub builds your app;
-                Deployer publishes it.
-              </p>
-            </div>
-          </aside>
         </template>
       </main>
-      <footer class="workspace-footer">
-        <span>Your server. Your apps.</span><span>Powered by GitHub Actions & Nginx</span>
-      </footer>
     </div>
 
     <AppDetails
@@ -709,36 +673,36 @@ onUnmounted(() => {
     <DialogRoot v-model:open="adding"
       ><DialogPortal
         ><DialogOverlay class="console-dialog-overlay" /><DialogContent
-          class="console-drawer"
+          class="console-modal"
           @interact-outside="busy && $event.preventDefault()"
           @escape-key-down="busy && $event.preventDefault()"
           @close-auto-focus="restoreFormFocus"
         >
-          <div class="drawer-heading">
-            <span class="drawer-icon"><UiIcon name="repo" /></span
+          <div class="modal-heading">
+            <span class="modal-icon"><UiIcon name="repo" /></span
             ><DialogClose as-child
               ><UiButton :disabled="busy" aria-label="Close new application"
                 ><UiIcon name="close" /></UiButton
             ></DialogClose>
           </div>
-          <DialogTitle class="drawer-title">{{
+          <DialogTitle class="modal-title">{{
             editing === null ? "Connect a repository" : "Edit application"
           }}</DialogTitle
-          ><DialogDescription class="drawer-description">{{
+          ><DialogDescription class="modal-description">{{
             editing === null
               ? "Give your next app a home. We’ll open a pull request with your build workflow for you to review."
               : "Update your source, build, and destination settings. Build changes require an updated workflow PR."
           }}</DialogDescription>
           <p v-if="error" class="console-message is-error" role="alert">{{ error }}</p>
-          <form class="drawer-form" @submit.prevent="addApp">
+          <form novalidate class="modal-form" @submit.prevent="addApp">
             <fieldset :disabled="busy">
               <legend>Source</legend>
               <Label for="repository">Repository</Label
               ><UiSelect
                 id="repository"
+                :error="fieldErrors['repository']"
                 v-model="form.repository"
                 name="repository"
-                required
                 :options="repositoryOptions"
                 :placeholder="loadingRepositories ? 'Loading repositories…' : 'Select a repository'"
                 :disabled="busy || loadingRepositories"
@@ -749,7 +713,12 @@ onUnmounted(() => {
                 form.
               </p>
               <Label for="branch">Production branch</Label
-              ><UiInput id="branch" v-model="form.branch" required :disabled="busy" />
+              ><UiInput
+                id="branch"
+                :error="fieldErrors['branch']"
+                v-model="form.branch"
+                :disabled="busy"
+              />
               <p class="field-hint">Pushes to this branch trigger a deployment.</p>
             </fieldset>
             <fieldset :disabled="busy">
@@ -757,6 +726,7 @@ onUnmounted(() => {
               <Label for="deployment-type">Deployment type</Label>
               <UiSelect
                 id="deployment-type"
+                :error="fieldErrors['buildConfig.deploymentType']"
                 v-model="form.buildConfig.deploymentType"
                 :options="[{ value: 'static', label: 'Static site' }]"
                 :disabled="busy"
@@ -765,6 +735,7 @@ onUnmounted(() => {
               <Label for="ecosystem">Build ecosystem</Label>
               <UiSelect
                 id="ecosystem"
+                :error="fieldErrors['buildConfig.ecosystem']"
                 :model-value="form.buildConfig.ecosystem"
                 :options="[
                   { value: 'none', label: 'None — plain static files' },
@@ -778,6 +749,7 @@ onUnmounted(() => {
                 <Label for="package-manager">Package manager</Label>
                 <UiSelect
                   id="package-manager"
+                  :error="fieldErrors['buildConfig.packageManager']"
                   :model-value="form.buildConfig.packageManager ?? 'npm'"
                   :options="[
                     { value: 'npm', label: 'npm (Node.js 24)' },
@@ -796,6 +768,7 @@ onUnmounted(() => {
               <Label for="framework">Framework preset</Label>
               <UiSelect
                 id="framework"
+                :error="fieldErrors['buildConfig.framework']"
                 v-model="form.buildConfig.framework"
                 :options="
                   form.buildConfig.ecosystem === 'none'
@@ -811,18 +784,33 @@ onUnmounted(() => {
                     : "Build with Vite, then publish the output directory. Commands remain editable."
                 }}
               </p>
-              <div v-if="form.buildConfig.ecosystem === 'javascript'" class="drawer-field-grid">
+              <div v-if="form.buildConfig.ecosystem === 'javascript'" class="modal-field-grid">
                 <div>
                   <Label for="install">Install command</Label
-                  ><UiInput id="install" v-model="form.installCommand" required :disabled="busy" />
+                  ><UiInput
+                    id="install"
+                    :error="fieldErrors['installCommand']"
+                    v-model="form.installCommand"
+                    :disabled="busy"
+                  />
                 </div>
                 <div>
                   <Label for="build">Build command</Label
-                  ><UiInput id="build" v-model="form.buildCommand" required :disabled="busy" />
+                  ><UiInput
+                    id="build"
+                    :error="fieldErrors['buildCommand']"
+                    v-model="form.buildCommand"
+                    :disabled="busy"
+                  />
                 </div>
               </div>
               <Label for="output">Output directory</Label
-              ><UiInput id="output" v-model="form.outputDirectory" required :disabled="busy" />
+              ><UiInput
+                id="output"
+                :error="fieldErrors['outputDirectory']"
+                v-model="form.outputDirectory"
+                :disabled="busy"
+              />
               <p class="field-hint">
                 {{
                   form.buildConfig.ecosystem === "none"
@@ -836,9 +824,9 @@ onUnmounted(() => {
               <Label for="domain">Domain</Label
               ><UiInput
                 id="domain"
+                :error="fieldErrors['domain']"
                 v-model="form.domain"
                 placeholder="www.example.com"
-                required
                 :disabled="busy"
                 autocapitalize="none"
               />
@@ -852,7 +840,7 @@ onUnmounted(() => {
               >
               <p class="field-hint">Serve index.html for routes that don’t match a file.</p>
             </fieldset>
-            <div class="drawer-actions">
+            <div class="modal-actions">
               <DialogClose as-child><UiButton :disabled="busy">Cancel</UiButton></DialogClose
               ><UiButton
                 type="submit"
