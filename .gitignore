@@ -7,6 +7,7 @@
 /frontend/*.tsbuildinfo
 /frontend/typed-router.d.ts
 /.hallmark
+/design.md
 /dist
 /.pnpm-store
 githubapp.pem
