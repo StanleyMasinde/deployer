@@ -1,11 +1,21 @@
 <script setup lang="ts">
+import { startLiveUpdates, stopLiveUpdates } from './live'
 import NavigationProgress from './components/NavigationProgress.vue'
 import BrandMark from './components/BrandMark.vue'
 import { ConfigProvider } from 'reka-ui'
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch, onUnmounted } from 'vue'
 import UiIcon from './components/ui/UiIcon.vue'
 import { useRoute } from 'vue-router'
 const route = useRoute()
+watch(
+  () => route.meta.consoleData?.authenticated,
+  (authenticated) => {
+    if (authenticated) startLiveUpdates()
+    else stopLiveUpdates()
+  },
+  { immediate: true },
+)
+onUnmounted(stopLiveUpdates)
 const scrollBody = ref<boolean | { padding: number; margin: number }>(true)
 onMounted(() => {
   if (CSS.supports('scrollbar-gutter: stable')) scrollBody.value = { padding: 0, margin: 0 }

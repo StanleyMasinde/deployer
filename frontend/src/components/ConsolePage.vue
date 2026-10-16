@@ -3,11 +3,12 @@ function clearFilters() {
   void router.replace({ query: { ...route.query, q: undefined, status: undefined } })
 }
 
+import { liveSnapshot, liveConnected, startLiveUpdates, stopLiveUpdates } from '../live'
 import BrandMark from './BrandMark.vue'
 import AccountMenu from './AccountMenu.vue'
 import ProfileDetails from './ProfileDetails.vue'
 import type { ConsoleData } from '../router/data'
-import { ref, reactive, computed, watch, watchEffect, provide, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, watchEffect, provide } from 'vue'
 import { buildPreset, type Ecosystem, type PackageManager } from '../build'
 import { signInSchema, applicationSchema, useValidation } from '../validation'
 import { applicationFormKey } from './applicationFormContext'
@@ -62,7 +63,23 @@ const pageTitle = computed(
     })[view.value] ?? 'Dashboard',
 )
 const deploymentPage = computed(() => Boolean(route.params.deploymentId))
-const application = computed(() => (route.params.appId ? route.meta.applicationData : undefined))
+const application = ref<App | undefined>(route.meta.applicationData)
+const applicationDeployments = computed(() => {
+  const history = new Map((route.meta.applicationDeployments ?? []).map((d) => [d.id, d]))
+  for (const deployment of deployments.value) {
+    if (String(deployment.appId) === String(route.params.appId))
+      history.set(deployment.id, deployment)
+  }
+  return [...history.values()].sort((a, b) => b.id - a.id).slice(0, 100)
+})
+const deployment = computed(
+  () =>
+    deployments.value.find((d) => String(d.id) === String(route.params.deploymentId)) ??
+    route.meta.deploymentData,
+)
+const deploymentApplication = computed(
+  () => apps.value.find((app) => app.id === deployment.value?.appId) ?? route.meta.applicationData,
+)
 const applicationPage = computed(() => Boolean(route.params.appId))
 const planned = computed(() =>
   ['personal', 'runtimes', 'resources', 'services', 'previews', 'domains', 'settings'].includes(
@@ -85,6 +102,36 @@ const pageDescription = computed(
       settings: 'Instance configuration and GitHub connections.',
     })[view.value],
 )
+watch(liveSnapshot, (snapshot) => {
+  if (!snapshot || !authenticated.value) return
+  route.meta.consoleData = {
+    authenticated: true,
+    user: route.meta.consoleData?.user,
+    apps: snapshot.apps,
+    deployments: snapshot.deployments,
+    error: '',
+  }
+  apps.value = snapshot.apps
+  deployments.value = snapshot.deployments
+  lastUpdated.value = new Date()
+  if (deploymentPage.value)
+    route.meta.deploymentData =
+      snapshot.deployments.find((d) => String(d.id) === String(route.params.deploymentId)) ??
+      route.meta.deploymentData
+  if (applicationPage.value) {
+    const app = snapshot.apps.find((app) => String(app.id) === String(route.params.appId))
+    if (app) {
+      route.meta.applicationData = app
+      application.value = app
+      const history = new Map((route.meta.applicationDeployments ?? []).map((d) => [d.id, d]))
+      for (const deployment of snapshot.deployments)
+        if (deployment.appId === app.id) history.set(deployment.id, deployment)
+      route.meta.applicationDeployments = [...history.values()]
+        .sort((a, b) => b.createdAt - a.createdAt || b.id - a.id)
+        .slice(0, 100)
+    }
+  }
+})
 const search = computed({
   get: () => (typeof route.query.q === 'string' ? route.query.q : ''),
   set: (value) => {
@@ -145,20 +192,6 @@ const repositoryOptions = computed(() => {
     options.unshift({ value: form.repository, label: form.repository })
   return options
 })
-let timer: ReturnType<typeof setTimeout> | undefined
-let stopped = false
-async function poll() {
-  if (stopped || !authenticated.value) return
-  await refresh()
-  if (!stopped && authenticated.value) timer = setTimeout(poll, 5000)
-}
-onMounted(() => {
-  if (authenticated.value) timer = setTimeout(poll, 5000)
-})
-onUnmounted(() => {
-  stopped = true
-  clearTimeout(timer)
-})
 let formTrigger: HTMLElement | null = null
 
 async function refresh() {
@@ -179,7 +212,11 @@ async function refresh() {
       error: '',
     }
   } catch (cause) {
-    if (cause instanceof ApiError && cause.status === 401) authenticated.value = false
+    if (cause instanceof ApiError && cause.status === 401) {
+      stopLiveUpdates()
+      authenticated.value = false
+      route.meta.consoleData = { authenticated: false, apps: [], deployments: [], error: '' }
+    }
     error.value = cause instanceof Error ? cause.message : 'Could not refresh deployments.'
   }
 }
@@ -204,7 +241,8 @@ async function signIn() {
       deployments: deployments.value,
       error: '',
     }
-    await poll()
+    startLiveUpdates()
+    await refresh()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : 'Could not sign in.'
   } finally {
@@ -215,6 +253,7 @@ async function signIn() {
 async function signOut() {
   try {
     await request('/session', { method: 'DELETE' })
+    stopLiveUpdates()
     authenticated.value = false
     apps.value = []
     deployments.value = []
@@ -244,6 +283,7 @@ function closeModal() {
 watch(
   () => route.fullPath,
   () => {
+    application.value = route.meta.applicationData
     const snapshot = route.meta.consoleData
     if (snapshot) {
       authenticated.value = snapshot.authenticated
@@ -539,15 +579,15 @@ provide(applicationFormKey, {
             :key="String(route.params.appId)"
             :open="true"
             :app-id="Number(route.params.appId)"
-            :initial-app="route.meta.applicationData"
-            :initial-deployments="route.meta.applicationDeployments"
+            :initial-app="application"
+            :initial-deployments="applicationDeployments"
             @edit="openForm"
             @changed="refresh"
           />
           <DeploymentDetails
             v-else-if="deploymentPage"
-            :deployment="route.meta.deploymentData"
-            :app="route.meta.applicationData"
+            :deployment="deployment"
+            :app="deploymentApplication"
           />
           <ProfileDetails v-else-if="view === 'profile'" :user="route.meta.consoleData?.user" />
           <PlannedPage v-else-if="planned" :area="view" />
@@ -745,7 +785,7 @@ provide(applicationFormKey, {
                   : filteredDeployments.length + ' deployments'
               }}</span
               ><span v-if="lastUpdated"
-                >Updated
+                >{{ liveConnected ? 'Live · Updated' : 'Updated' }}
                 {{
                   lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                 }}</span

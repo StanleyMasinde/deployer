@@ -483,6 +483,13 @@ async fn check_http(store: Store, database_url: &str) {
     check_deployment_resources(&app, &cleanup_store, &cookie).await;
     check_workflow_pr_updates(&app, &cleanup_store, config.providers.github().unwrap()).await;
     check_build_lifecycle(&app, &cleanup_store, config.providers.github().unwrap()).await;
+    check_live_events(
+        &app,
+        &cleanup_store,
+        &cookie,
+        config.providers.github().unwrap(),
+    )
+    .await;
     check_app_crud(
         &app,
         &cleanup_store,
@@ -1645,6 +1652,177 @@ async fn check_build_lifecycle(
         .exec(&mut store.database())
         .await
         .unwrap();
+    toasty::sql::statement("DELETE FROM apps WHERE id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+}
+
+async fn check_live_events(
+    router: &axum::Router,
+    store: &Store,
+    cookie: &str,
+    github: &deployer::config::Github,
+) {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+    use std::time::Duration;
+    use tokio_stream::StreamExt;
+    use tower::ServiceExt;
+
+    for cookie in [
+        None,
+        Some("deployer_session=invalid".to_owned()),
+        Some(format!(
+            "deployer_session={}",
+            deployer::application::sessions::issue(&"a".repeat(64), deployer::now() - 1)
+        )),
+    ] {
+        let mut request = Request::builder().uri("/api/events");
+        if let Some(cookie) = cookie {
+            request = request.header("cookie", cookie);
+        }
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let nonce = rand::random::<u32>();
+    let app = store
+        .create_app(
+            "github",
+            &NewApp {
+                repository: format!("live/repo-{nonce}"),
+                branch: "main".into(),
+                domain: format!("live-{nonce}.example.com"),
+                build_config: Default::default(),
+                install_command: String::new(),
+                build_command: String::new(),
+                output_directory: ".".into(),
+                spa: false,
+            },
+        )
+        .await
+        .unwrap();
+    let url = format!("https://github.com/{}/pull/1", app.repository);
+    store.set_pr(app.id, &url).await.unwrap();
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/events")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/event-stream");
+    assert_eq!(response.headers()["x-accel-buffering"], "no");
+    let mut stream = response.into_body().into_data_stream();
+    let decode = |bytes: &[u8]| {
+        let frame = std::str::from_utf8(bytes).unwrap();
+        assert!(frame.contains("event: snapshot"));
+        serde_json::from_str::<serde_json::Value>(
+            frame
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .unwrap(),
+        )
+        .unwrap()
+    };
+    let frame = tokio::time::timeout(Duration::from_secs(2), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let snapshot = decode(&frame);
+    assert!(snapshot["deployments"].is_array());
+    let row = snapshot["apps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == app.id)
+        .unwrap();
+    assert_eq!(row["workflowPrState"], "open");
+    assert!(snapshot.get("user").is_none());
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "action": "closed", "installation": { "id": github.installation_id },
+        "repository": { "full_name": app.repository },
+        "pull_request": { "html_url": url, "state": "closed", "merged": true, "updated_at": "2026-10-16T14:00:00Z" }
+    })).unwrap();
+    let mut mac = Hmac::<Sha256>::new_from_slice(github.webhook_secret.as_bytes()).unwrap();
+    mac.update(&bytes);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/webhooks/github")
+                    .header("x-github-event", "pull_request")
+                    .header(
+                        "x-hub-signature-256",
+                        format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+                    )
+                    .body(Body::from(bytes))
+                    .unwrap()
+            )
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let frame = tokio::time::timeout(Duration::from_secs(1), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let snapshot = decode(&frame);
+    let row = snapshot["apps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == app.id)
+        .unwrap();
+    assert_eq!(row["workflowPrState"], "merged");
+    store.notify_changes();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), stream.next())
+            .await
+            .is_err()
+    );
+    // A separate worker process cannot share Notify; its database writes must still reach the stream.
+    toasty::sql::statement("UPDATE apps SET https_error = 'worker update' WHERE id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(3), stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let snapshot = decode(&frame);
+    let row = snapshot["apps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == app.id)
+        .unwrap();
+    assert_eq!(row["https"]["error"], "worker update");
+    drop(stream);
     toasty::sql::statement("DELETE FROM apps WHERE id = ?")
         .bind(app.id)
         .exec(&mut store.database())

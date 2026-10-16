@@ -1,4 +1,5 @@
 pub mod auth;
+mod events;
 pub mod frontend;
 mod handlers;
 pub mod jsonapi;
@@ -45,6 +46,7 @@ impl IntoResponse for ApiError {
 
 pub fn router(state: State) -> Router {
     let protected = Router::new()
+        .route("/api/events", get(events::stream))
         .route(
             "/api/session",
             get(handlers::session).delete(handlers::logout),

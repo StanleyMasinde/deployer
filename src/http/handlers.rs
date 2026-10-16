@@ -282,6 +282,7 @@ pub async fn webhook(
                     .update_workflow_pr(&update)
                     .await
                     .map_err(ApiError::internal)?;
+                state.store.notify_changes();
             }
             return Ok(StatusCode::ACCEPTED);
         }
@@ -307,6 +308,7 @@ pub async fn webhook(
             .map_err(ApiError::internal)?;
     }
 
+    state.store.notify_changes();
     Ok(StatusCode::ACCEPTED)
 }
 

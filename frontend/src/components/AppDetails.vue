@@ -57,27 +57,7 @@ const loading = ref(false),
 const certificateStatus = computed(() =>
   app.value ? httpsStatus(app.value.domain, app.value.https) : 'disabled',
 )
-let poll: ReturnType<typeof setInterval> | undefined
-watch(
-  () => props.open,
-  (open) => {
-    clearInterval(poll)
-    if (open)
-      poll = setInterval(async () => {
-        if (busy.value || !app.value) return
-        const id = props.appId
-        try {
-          const record = await request<App>(`/apps/${id}`)
-          if (props.open && props.appId === id) app.value = record
-        } catch {
-          /* A manual refresh remains available. */
-        }
-      }, 5000)
-  },
-  { immediate: true },
-)
 onUnmounted(() => {
-  clearInterval(poll)
   generation++
 })
 async function enableHttps() {
