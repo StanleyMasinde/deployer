@@ -482,6 +482,7 @@ async fn check_http(store: Store, database_url: &str) {
     check_mail_queue(&cleanup_store, current_provider.as_ref(), &config.worker).await;
     check_deployment_resources(&app, &cleanup_store, &cookie).await;
     check_workflow_pr_updates(&app, &cleanup_store, config.providers.github().unwrap()).await;
+    check_build_lifecycle(&app, &cleanup_store, config.providers.github().unwrap()).await;
     check_app_crud(
         &app,
         &cleanup_store,
@@ -1372,6 +1373,278 @@ async fn check_workflow_pr_updates(
         .unwrap();
     assert_eq!(row.workflow_pr_state.as_deref(), Some("open"));
     assert!(store.app_deployments(app.id).await.unwrap().is_empty());
+    toasty::sql::statement("DELETE FROM apps WHERE id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+}
+
+async fn check_build_lifecycle(
+    router: &axum::Router,
+    store: &Store,
+    github: &deployer::config::Github,
+) {
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use deployer::storage::models::Job;
+    use hmac::{Hmac, KeyInit, Mac};
+    use sha2::Sha256;
+    use tower::ServiceExt;
+
+    let nonce = rand::random::<u32>();
+    let app = store
+        .create_app(
+            "github",
+            &NewApp {
+                repository: format!("builds/repo-{nonce}"),
+                branch: "main".into(),
+                domain: format!("builds-{nonce}.example.com"),
+                build_config: Default::default(),
+                install_command: String::new(),
+                build_command: String::new(),
+                output_directory: ".".into(),
+                spa: false,
+            },
+        )
+        .await
+        .unwrap();
+    let event = |run: u64, attempt: u32, action: &str, conclusion: Option<&str>| {
+        serde_json::json!({
+            "action": action, "installation": { "id": github.installation_id },
+            "repository": { "full_name": app.repository },
+            "workflow_run": { "id": run, "run_attempt": attempt, "head_branch": "main",
+                "head_sha": "a".repeat(40), "event": "push", "conclusion": conclusion,
+                "path": deployer::providers::github::workflow::PATH,
+                "head_repository": { "full_name": app.repository } }
+        })
+    };
+    let request = |payload: &serde_json::Value| {
+        let bytes = serde_json::to_vec(payload).unwrap();
+        let mut mac = Hmac::<Sha256>::new_from_slice(github.webhook_secret.as_bytes()).unwrap();
+        mac.update(&bytes);
+        Request::builder()
+            .method("POST")
+            .uri("/api/webhooks/github")
+            .header("x-github-event", "workflow_run")
+            .header(
+                "x-hub-signature-256",
+                format!("sha256={}", hex::encode(mac.finalize().into_bytes())),
+            )
+            .body(Body::from(bytes))
+            .unwrap()
+    };
+    for (field, value) in [
+        ("path", serde_json::json!(".github/workflows/unrelated.yml")),
+        ("event", serde_json::json!("pull_request")),
+        (
+            "head_repository",
+            serde_json::json!({ "full_name": "other/fork" }),
+        ),
+        ("head_branch", serde_json::json!("other-branch")),
+    ] {
+        let mut ignored = event(10, 1, "in_progress", None);
+        ignored["workflow_run"][field] = value;
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&ignored))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    let mut invalid = event(10, 1, "in_progress", None);
+    invalid["workflow_run"]["head_sha"] = serde_json::json!("invalid");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&invalid))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    invalid = event(10, 1, "in_progress", None);
+    invalid["installation"]["id"] = serde_json::json!(github.installation_id + 1);
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&invalid))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    assert!(store.app_deployments(app.id).await.unwrap().is_empty());
+    for action in ["requested", "in_progress", "in_progress"] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&event(11, 1, action, None)))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    let history = store.app_deployments(app.id).await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].status, "building");
+    assert!(history[0].error.is_none());
+    assert!(history[0].finished_at.is_none());
+    assert!(
+        Job::filter_by_deployment_id(history[0].id)
+            .exec(&mut store.database())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    for (action, conclusion) in [
+        ("completed", Some("failure")),
+        ("completed", Some("failure")),
+        ("in_progress", None),
+    ] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&event(11, 1, action, conclusion)))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    let history = store.app_deployments(app.id).await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].status, "failed");
+    assert_eq!(
+        history[0].error.as_deref(),
+        Some("GitHub workflow concluded: failure")
+    );
+    assert!(history[0].finished_at.is_some());
+    assert!(
+        Job::filter_by_deployment_id(history[0].id)
+            .exec(&mut store.database())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&event(12, 1, "requested", None)))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let success = event(12, 1, "completed", Some("success"));
+    let (first, second) = tokio::join!(
+        router.clone().oneshot(request(&success)),
+        router.clone().oneshot(request(&success))
+    );
+    assert_eq!(first.unwrap().status(), StatusCode::ACCEPTED);
+    assert_eq!(second.unwrap().status(), StatusCode::ACCEPTED);
+    let history = store.app_deployments(app.id).await.unwrap();
+    assert_eq!(history.len(), 2);
+    let queued = history.iter().find(|d| d.run_id == 12).unwrap();
+    assert_eq!(queued.status, "queued");
+    assert!(queued.finished_at.is_none());
+    assert_eq!(
+        Job::filter_by_deployment_id(queued.id)
+            .exec(&mut store.database())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    for (action, conclusion) in [("in_progress", None), ("completed", Some("failure"))] {
+        assert_eq!(
+            router
+                .clone()
+                .oneshot(request(&event(12, 1, action, conclusion)))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::ACCEPTED
+        );
+    }
+    assert_eq!(store.deployment(queued.id).await.unwrap().status, "queued");
+    let job = store.next().await.unwrap().unwrap();
+    assert!(matches!(job.task, deployer::domain::JobTask::Deployment(id) if id == queued.id));
+    store.finish(job.id, "live", None).await.unwrap();
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&event(12, 1, "in_progress", None)))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(store.deployment(queued.id).await.unwrap().status, "live");
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&event(12, 2, "in_progress", None)))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&event(12, 2, "completed", Some("cancelled"))))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let history = store.app_deployments(app.id).await.unwrap();
+    assert_eq!(history.len(), 3);
+    let retry = history.iter().find(|d| d.attempt == 2).unwrap();
+    assert_eq!(retry.status, "failed");
+    assert_ne!(retry.id, queued.id);
+    assert!(
+        Job::filter_by_deployment_id(retry.id)
+            .exec(&mut store.database())
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    deployer::storage::models::App::filter_by_id(app.id)
+        .update()
+        .deleted_at(Some(deployer::now()))
+        .exec(&mut store.database())
+        .await
+        .unwrap();
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(request(&event(13, 1, "in_progress", None)))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    assert_eq!(store.app_deployments(app.id).await.unwrap().len(), 3);
+    toasty::sql::statement(
+        "DELETE FROM jobs WHERE deployment_id IN (SELECT id FROM deployments WHERE app_id = ?)",
+    )
+    .bind(app.id)
+    .exec(&mut store.database())
+    .await
+    .unwrap();
+    toasty::sql::statement("DELETE FROM deployments WHERE app_id = ?")
+        .bind(app.id)
+        .exec(&mut store.database())
+        .await
+        .unwrap();
     toasty::sql::statement("DELETE FROM apps WHERE id = ?")
         .bind(app.id)
         .exec(&mut store.database())

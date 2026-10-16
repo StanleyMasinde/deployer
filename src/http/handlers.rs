@@ -289,6 +289,16 @@ pub async fn webhook(
         _ => return Ok(StatusCode::NO_CONTENT),
     }
 
+    if let Some((build, status, error)) =
+        crate::providers::github::webhook::parse_workflow_status(&body, github.installation_id)
+            .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "Invalid workflow event".into()))?
+    {
+        state
+            .store
+            .record_workflow_status(&build, status, error.as_deref())
+            .await
+            .map_err(ApiError::internal)?;
+    }
     if let Some(build) = crate::providers::github::webhook::parse(&body, github.installation_id)
         .map_err(|_| ApiError(StatusCode::BAD_REQUEST, "Invalid workflow event".into()))?
     {

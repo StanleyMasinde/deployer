@@ -79,3 +79,27 @@ impl Store {
             .map(Into::into))
     }
 }
+
+impl Store {
+    pub async fn record_workflow_status(
+        &self,
+        build: &crate::domain::BuildCompleted,
+        status: &str,
+        error: Option<&str>,
+    ) -> anyhow::Result<()> {
+        for app in self.apps().await? {
+            if app.provider != "github"
+                || app.deletion_requested
+                || !app.repository.eq_ignore_ascii_case(&build.repository)
+                || app.branch != build.branch
+            {
+                continue;
+            }
+            let key = format!("github:{}:{}:{}", app.id, build.run_id, build.attempt);
+            toasty::sql::statement("INSERT INTO deployments (event_key, app_id, run_id, attempt, commit_sha, status, error, created_at, finished_at) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, NULLIF(?, 0)) ON DUPLICATE KEY UPDATE error = IF(status = 'building', VALUES(error), error), finished_at = IF(status = 'building', VALUES(finished_at), finished_at), status = IF(status = 'building', VALUES(status), status)")
+                .bind(&key).bind(app.id).bind(build.run_id).bind(build.attempt).bind(&build.commit_sha).bind(status).bind(error.unwrap_or_default()).bind(crate::now()).bind(if status == "failed" { crate::now() } else { 0 })
+                .exec(&mut self.db.clone()).await?;
+        }
+        Ok(())
+    }
+}

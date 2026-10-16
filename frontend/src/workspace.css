@@ -814,3 +814,8 @@
 .workflow-state[data-status='merged'] {
   color: var(--color-success);
 }
+
+.deployment-status[data-status='building'] {
+  background: var(--color-tint);
+  color: var(--color-accent);
+}

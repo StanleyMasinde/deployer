@@ -132,3 +132,51 @@ pub fn parse_pull_request(
         updated_at: p.pull_request.updated_at,
     }))
 }
+
+pub fn parse_workflow_status(
+    body: &[u8],
+    installation_id: u64,
+) -> anyhow::Result<Option<(BuildCompleted, &'static str, Option<String>)>> {
+    let p: Payload = serde_json::from_slice(body)?;
+    ensure!(
+        p.installation.id == installation_id,
+        "unexpected GitHub installation"
+    );
+    let run = p.workflow_run;
+    if !matches!(run.event.as_str(), "push" | "workflow_dispatch")
+        || run.path != super::workflow::PATH
+        || !run
+            .head_repository
+            .full_name
+            .eq_ignore_ascii_case(&p.repository.full_name)
+    {
+        return Ok(None);
+    }
+    let (status, error) = match p.action.as_str() {
+        "requested" | "in_progress" => ("building", None),
+        "completed" if run.conclusion.as_deref() == Some("success") => return Ok(None),
+        "completed" => (
+            "failed",
+            Some(format!(
+                "GitHub workflow concluded: {}",
+                run.conclusion.as_deref().unwrap_or("unknown")
+            )),
+        ),
+        _ => return Ok(None),
+    };
+    ensure!(
+        run.head_sha.len() == 40 && run.head_sha.bytes().all(|c| c.is_ascii_hexdigit()),
+        "invalid commit SHA"
+    );
+    Ok(Some((
+        BuildCompleted {
+            repository: p.repository.full_name,
+            branch: run.head_branch.unwrap_or_default(),
+            run_id: run.id,
+            attempt: run.run_attempt,
+            commit_sha: run.head_sha,
+        },
+        status,
+        error,
+    )))
+}

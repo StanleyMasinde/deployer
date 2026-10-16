@@ -24,7 +24,13 @@ const attention = computed(() =>
 )
 const name = (id: number) => props.apps.find((a) => a.id === id)?.domain ?? `Application #${id}`
 const label = (status: string) =>
-  ({ live: 'Live', failed: 'Failed', deploying: 'Deploying', queued: 'Queued' })[status] ?? status
+  ({
+    live: 'Live',
+    failed: 'Failed',
+    building: 'Building',
+    deploying: 'Deploying',
+    queued: 'Queued',
+  })[status] ?? status
 </script>
 <template>
   <div class="dashboard">
@@ -42,7 +48,7 @@ const label = (status: string) =>
       <div>
         <dt><span class="state-dot is-working"></span>In progress</dt>
         <dd>{{ working }}</dd>
-        <span>Queued or deploying</span>
+        <span>Building, queued or deploying</span>
       </div>
       <div>
         <dt><span class="state-dot is-waiting"></span>Needs attention</dt>

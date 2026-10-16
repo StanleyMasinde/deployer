@@ -94,7 +94,7 @@ const search = computed({
 const filter = computed({
   get: () =>
     typeof route.query.status === 'string' &&
-    ['live', 'deploying', 'queued', 'failed', 'attention'].includes(route.query.status)
+    ['live', 'building', 'deploying', 'queued', 'failed', 'attention'].includes(route.query.status)
       ? route.query.status
       : 'all',
   set: (value) => {
@@ -367,6 +367,7 @@ function statusLabel(status?: string) {
       {
         live: 'Live',
         failed: 'Failed',
+        building: 'Building',
         queued: 'Queued',
         deploying: 'Deploying',
         superseded: 'Superseded',
@@ -574,6 +575,7 @@ provide(applicationFormKey, {
                     { value: 'all', label: 'All statuses' },
                     { value: 'live', label: 'Live' },
                     { value: 'failed', label: 'Failed' },
+                    { value: 'building', label: 'Building' },
                     { value: 'deploying', label: 'Deploying' },
                     { value: 'queued', label: 'Queued' },
                     { value: 'attention', label: 'Needs attention' },

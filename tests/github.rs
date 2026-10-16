@@ -171,3 +171,22 @@ fn pull_request_events_distinguish_merge_close_and_reopen() {
     assert_eq!(parse(&event).state, "open");
     assert!(webhook::parse_pull_request(&serde_json::to_vec(&event).unwrap(), 99).is_err());
 }
+
+#[test]
+fn workflow_progress_and_failure_do_not_publish_artifacts() {
+    let mut event = json!({"action":"in_progress","installation":{"id":42},"repository":{"full_name":"owner/repo"},"workflow_run":{"id":123,"run_attempt":1,"head_branch":"main","head_sha":"a".repeat(40),"event":"push","conclusion":null,"path":workflow::PATH,"head_repository":{"full_name":"owner/repo"}}});
+    let parse = |value: &serde_json::Value| {
+        webhook::parse_workflow_status(&serde_json::to_vec(value).unwrap(), 42).unwrap()
+    };
+    assert_eq!(parse(&event).unwrap().1, "building");
+    event["action"] = json!("completed");
+    event["workflow_run"]["conclusion"] = json!("failure");
+    assert_eq!(parse(&event).unwrap().1, "failed");
+    assert!(
+        webhook::parse(&serde_json::to_vec(&event).unwrap(), 42)
+            .unwrap()
+            .is_none()
+    );
+    event["workflow_run"]["head_repository"]["full_name"] = json!("other/fork");
+    assert!(parse(&event).is_none());
+}
